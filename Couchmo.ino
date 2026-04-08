@@ -1,54 +1,108 @@
 #include <Bluepad32.h>
 
-#define SERIAL_BAUD   115200
+#define SERIAL_BAUD       115200
 
 // --- Pins and PWM Configuration ---
-// D2 for Left, D13 for Right
-#define PIN_LEFT      2
-#define PIN_RIGHT     13
+#define PIN_LEFT          2
+#define PIN_RIGHT         13
 
-const int PWM_FREQ = 5000;   // 5 kHz — good for RC low-pass filtering
-const int PWM_RES  = 8;      // 8-bit resolution (0–255)
+const int PWM_FREQ = 5000;
+const int PWM_RES  = 8;      // 8-bit (0–255)
 const int CH_LEFT  = 0;
 const int CH_RIGHT = 1;
 
 // ---------------------------------------------------------------
 // Throttle voltage calibration  (PWM + level-shifter to 5 V)
-//   After RC filtering the PWM becomes a DC voltage:
-//     duty 0   → 0 V,  duty 255 → 5 V   (with 3.3→5 V shifter)
-//
-//   THROTTLE_REST  — below the controller's "go" threshold so
-//                    the motor is truly stopped.  ~0.8 V → duty 41
-//   THROTTLE_MIN   — the lowest speed the controller recognises
-//                    as "go".                    ~1.1 V → duty 56
-//   THROTTLE_MAX   — full speed.                 ~4.2 V → duty 214
-//
-//   Brake drives the signal to THROTTLE_REST (below "go").
-//   *** Measure your controller's expected range and adjust! ***
+//   THROTTLE_REST  — below the "go" threshold.       ~0.8 V → duty 41
+//   THROTTLE_MIN   — minimum recognised speed.       ~1.1 V → duty 56
+//   THROTTLE_MAX   — full speed.                     ~4.2 V → duty 214
 // ---------------------------------------------------------------
-#define THROTTLE_REST  41     // ~0.8 V — rest / brake (below "go")
-#define THROTTLE_MIN   56     // ~1.1 V — minimum "go" signal
-#define THROTTLE_MAX   214    // ~4.2 V — full speed
+#define THROTTLE_REST     41
+#define THROTTLE_MIN      56
+#define THROTTLE_MAX      214
 
-ControllerPtr myController = nullptr;
+// --- Mode switching & UART watchdog ---
+#define MODE_SWITCH_MS    5000    // Hold triangle for 5 s to toggle
+#define UART_TIMEOUT_MS   500    // No valid UART command → rest
 
-// ---------------------------------------------------------------
-// setThrottle: left/right are 0–255 forward-only values.
-//   Negative values (reverse) are clamped to zero because a
-//   single-wire potentiometer-style throttle has no reverse lane.
+enum DriveMode { MODE_CONTROLLER, MODE_UART };
+
+DriveMode         currentMode       = MODE_CONTROLLER;
+ControllerPtr     myController      = nullptr;
+unsigned long     triangleHoldStart = 0;
+bool              triangleSwitched  = false;  // Prevents re-firing while held
+unsigned long     lastValidCmd      = 0;
+
 // ---------------------------------------------------------------
 void setThrottle(int left, int right) {
   left  = constrain(left,  0, 255);
   right = constrain(right, 0, 255);
 
-  // speed 0 → THROTTLE_REST (below "go"); speed 1-255 → THROTTLE_MIN … THROTTLE_MAX
-  uint8_t dutyLeft  = left  == 0 ? THROTTLE_REST : (uint8_t)map(left,  1, 255, THROTTLE_MIN, THROTTLE_MAX);
-  uint8_t dutyRight = right == 0 ? THROTTLE_REST : (uint8_t)map(right, 1, 255, THROTTLE_MIN, THROTTLE_MAX);
+  uint8_t dutyLeft  = left  == 0 ? THROTTLE_REST
+                                 : (uint8_t)map(left,  1, 255, THROTTLE_MIN, THROTTLE_MAX);
+  uint8_t dutyRight = right == 0 ? THROTTLE_REST
+                                 : (uint8_t)map(right, 1, 255, THROTTLE_MIN, THROTTLE_MAX);
 
   ledcWrite(CH_LEFT,  dutyLeft);
   ledcWrite(CH_RIGHT, dutyRight);
 }
 
+// ---------------------------------------------------------------
+// Differential mixing shared by both input sources.
+// throttle255: 0–255,  steer255: -255–255
+// ---------------------------------------------------------------
+void applyMix(int throttle255, int steer255) {
+  int leftSpeed  = throttle255 + steer255;
+  int rightSpeed = throttle255 - steer255;
+
+  int maxVal = max(abs(leftSpeed), abs(rightSpeed));
+  if (maxVal > 255) {
+    leftSpeed  = leftSpeed  * 255 / maxVal;
+    rightSpeed = rightSpeed * 255 / maxVal;
+  }
+
+  setThrottle(leftSpeed, rightSpeed);
+}
+
+// ---------------------------------------------------------------
+// UART command parser — reads all buffered lines, applies the
+// last valid command.  Protocol: "steer,throttle\n"
+//   steer    ∈ [-1.0, 1.0]
+//   throttle ∈ [ 0.0, 1.0]
+// Replies ACK or ERR per line.
+// ---------------------------------------------------------------
+void handleUARTInput() {
+  while (Serial.available()) {
+    String line = Serial.readStringUntil('\n');
+    line.trim();
+    if (line.length() == 0) continue;
+
+    int commaIdx = line.indexOf(',');
+    if (commaIdx <= 0 || commaIdx >= (int)line.length() - 1) {
+      Serial.println("ERR");
+      continue;
+    }
+
+    float steer    = line.substring(0, commaIdx).toFloat();
+    float throttle = line.substring(commaIdx + 1).toFloat();
+
+    if (steer < -1.0f || steer > 1.0f || throttle < 0.0f || throttle > 1.0f) {
+      Serial.println("ERR");
+      continue;
+    }
+
+    int throttle255 = (int)(throttle * 255.0f);
+    int steer255    = (int)(steer    * 255.0f);
+
+    applyMix(throttle255, steer255);
+    lastValidCmd = millis();
+    Serial.println("ACK");
+  }
+}
+
+// ---------------------------------------------------------------
+// Bluepad32 callbacks
+// ---------------------------------------------------------------
 void onConnectedController(ControllerPtr ctl) {
   myController = ctl;
   Serial.println("[LOG] PS4 controller connected!");
@@ -56,10 +110,13 @@ void onConnectedController(ControllerPtr ctl) {
 
 void onDisconnectedController(ControllerPtr ctl) {
   myController = nullptr;
-  setThrottle(0, 0);
-  Serial.println("[LOG] PS4 controller disconnected — motors stopped.");
+  if (currentMode == MODE_CONTROLLER) {
+    setThrottle(0, 0);
+  }
+  Serial.println("[LOG] PS4 controller disconnected.");
 }
 
+// ---------------------------------------------------------------
 void setup() {
   Serial.begin(SERIAL_BAUD);
   Serial.println("[LOG] ESP32 booting...");
@@ -70,72 +127,99 @@ void setup() {
   ledcSetup(CH_RIGHT, PWM_FREQ, PWM_RES);
   ledcAttachPin(PIN_RIGHT, CH_RIGHT);
 
-  setThrottle(0, 0);   // Both channels sit at THROTTLE_REST (~0.8 V) on boot
+  setThrottle(0, 0);
 
   BP32.setup(&onConnectedController, &onDisconnectedController);
+  Serial.println("[LOG] Mode: CONTROLLER");
   Serial.println("[LOG] Waiting for PS4 controller...");
 }
 
+// ---------------------------------------------------------------
 void loop() {
   BP32.update();
 
+  // ── Always: triangle mode-switch + universal brake ──────────
   if (myController && myController->isConnected()) {
 
-    int rawThrottle = myController->axisY();    // Left stick Y
-    int rawTurn     = myController->axisRX();   // Right stick X
-    bool brake      = myController->b();        // Circle button
+    // Triangle hold → toggle mode after 5 s
+    bool triDown = myController->y();
+    if (triDown) {
+      if (triangleHoldStart == 0)
+        triangleHoldStart = millis();
 
-    if (brake) {
+      if (!triangleSwitched && millis() - triangleHoldStart >= MODE_SWITCH_MS) {
+        currentMode = (currentMode == MODE_CONTROLLER) ? MODE_UART : MODE_CONTROLLER;
+        setThrottle(0, 0);
+        triangleSwitched = true;
+
+        if (currentMode == MODE_UART) {
+          lastValidCmd = millis();   // Seed watchdog so it doesn't fire instantly
+          Serial.println("[LOG] Mode: UART");
+        } else {
+          Serial.println("[LOG] Mode: CONTROLLER");
+        }
+      }
+    } else {
+      triangleHoldStart = 0;
+      triangleSwitched  = false;
+    }
+
+    // Circle = universal brake in every mode
+    if (myController->b()) {
       setThrottle(0, 0);
       Serial.println("[LOG] BRAKE");
       return;
     }
-
-    if (abs(rawThrottle) < 20) rawThrottle = 0;
-    if (abs(rawTurn)     < 20) rawTurn     = 0;
-
-    // axisY is negative when pushed forward — flip it
-    rawThrottle = -rawThrottle;
-
-    // Forward only — drop any reverse input
-    if (rawThrottle < 0) rawThrottle = 0;
-
-    int throttle = map(rawThrottle,    0, 511, 0,    255);
-    int turn     = map(rawTurn,     -511, 511, -255, 255);
-
-    // Differential mixing
-    int leftSpeed  = throttle + turn;
-    int rightSpeed = throttle - turn;
-
-    // Preserve the left/right ratio if either side clips
-    int maxVal = max(abs(leftSpeed), abs(rightSpeed));
-    if (maxVal > 255) {
-      leftSpeed  = leftSpeed  * 255 / maxVal;
-      rightSpeed = rightSpeed * 255 / maxVal;
-    }
-
-    setThrottle(leftSpeed, rightSpeed);
-
-    int clL = constrain(leftSpeed,  0, 255);
-    int clR = constrain(rightSpeed, 0, 255);
-    Serial.printf("[LOG] Throttle=%d Turn=%d  L=%d R=%d  PWM_L=%d PWM_R=%d\n",
-      throttle, turn, leftSpeed, rightSpeed,
-      clL == 0 ? THROTTLE_REST : (int)map(clL, 1, 255, THROTTLE_MIN, THROTTLE_MAX),
-      clR == 0 ? THROTTLE_REST : (int)map(clR, 1, 255, THROTTLE_MIN, THROTTLE_MAX));
-
-  } else {
-    setThrottle(0, 0);
-    static unsigned long lastWarn = 0;
-    if (millis() - lastWarn > 3000) {
-      Serial.println("[LOG] Waiting for controller...");
-      lastWarn = millis();
-    }
   }
 
-  if (Serial.available()) {
-    String cmd = Serial.readStringUntil('\n');
-    cmd.trim();
-    Serial.print("[LOG] Serial in: ");
-    Serial.println(cmd);
+  // ── Mode-specific input ─────────────────────────────────────
+  if (currentMode == MODE_CONTROLLER) {
+
+    if (myController && myController->isConnected()) {
+      int rawThrottle = myController->axisY();
+      int rawTurn     = myController->axisRX();
+
+      if (abs(rawThrottle) < 20) rawThrottle = 0;
+      if (abs(rawTurn)     < 20) rawTurn     = 0;
+
+      rawThrottle = -rawThrottle;
+      if (rawThrottle < 0) rawThrottle = 0;
+
+      int throttle = map(rawThrottle, 0, 511, 0,    255);
+      int turn     = map(rawTurn,  -511, 511, -255, 255);
+
+      applyMix(throttle, turn);
+
+      int clL = constrain(throttle + turn, 0, 255);
+      int clR = constrain(throttle - turn, 0, 255);
+      Serial.printf("[LOG] T=%d S=%d  L=%d R=%d  PWM_L=%d PWM_R=%d\n",
+        throttle, turn, clL, clR,
+        clL == 0 ? THROTTLE_REST : (int)map(clL, 1, 255, THROTTLE_MIN, THROTTLE_MAX),
+        clR == 0 ? THROTTLE_REST : (int)map(clR, 1, 255, THROTTLE_MIN, THROTTLE_MAX));
+
+    } else {
+      setThrottle(0, 0);
+      static unsigned long lastWarn = 0;
+      if (millis() - lastWarn > 3000) {
+        Serial.println("[LOG] Waiting for controller...");
+        lastWarn = millis();
+      }
+    }
+
+  } else {
+    // MODE_UART
+    if (Serial.available()) {
+      handleUARTInput();
+    }
+
+    // Watchdog — no valid command within timeout → rest
+    if (millis() - lastValidCmd > UART_TIMEOUT_MS) {
+      setThrottle(0, 0);
+      static unsigned long lastWdWarn = 0;
+      if (millis() - lastWdWarn > 3000) {
+        Serial.println("[LOG] UART watchdog — no command, motors at rest.");
+        lastWdWarn = millis();
+      }
+    }
   }
 }
