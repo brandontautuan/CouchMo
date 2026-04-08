@@ -16,12 +16,19 @@ const int CH_RIGHT = 1;
 // Throttle voltage calibration  (PWM + level-shifter to 5 V)
 //   After RC filtering the PWM becomes a DC voltage:
 //     duty 0   → 0 V,  duty 255 → 5 V   (with 3.3→5 V shifter)
-//   Typical hall-effect throttle idle  ≈ 1.1 V  → duty ~56
-//   Typical hall-effect throttle full  ≈ 4.2 V  → duty ~214
+//
+//   THROTTLE_REST  — below the controller's "go" threshold so
+//                    the motor is truly stopped.  ~0.8 V → duty 41
+//   THROTTLE_MIN   — the lowest speed the controller recognises
+//                    as "go".                    ~1.1 V → duty 56
+//   THROTTLE_MAX   — full speed.                 ~4.2 V → duty 214
+//
+//   Brake drives the signal to THROTTLE_REST (below "go").
 //   *** Measure your controller's expected range and adjust! ***
 // ---------------------------------------------------------------
-#define THROTTLE_ZERO  56     // ~1.1 V — idle / zero speed
-#define THROTTLE_FULL  214    // ~4.2 V — full speed
+#define THROTTLE_REST  41     // ~0.8 V — rest / brake (below "go")
+#define THROTTLE_MIN   56     // ~1.1 V — minimum "go" signal
+#define THROTTLE_MAX   214    // ~4.2 V — full speed
 
 ControllerPtr myController = nullptr;
 
@@ -34,8 +41,9 @@ void setThrottle(int left, int right) {
   left  = constrain(left,  0, 255);
   right = constrain(right, 0, 255);
 
-  uint8_t dutyLeft  = (uint8_t)map(left,  0, 255, THROTTLE_ZERO, THROTTLE_FULL);
-  uint8_t dutyRight = (uint8_t)map(right, 0, 255, THROTTLE_ZERO, THROTTLE_FULL);
+  // speed 0 → THROTTLE_REST (below "go"); speed 1-255 → THROTTLE_MIN … THROTTLE_MAX
+  uint8_t dutyLeft  = left  == 0 ? THROTTLE_REST : (uint8_t)map(left,  1, 255, THROTTLE_MIN, THROTTLE_MAX);
+  uint8_t dutyRight = right == 0 ? THROTTLE_REST : (uint8_t)map(right, 1, 255, THROTTLE_MIN, THROTTLE_MAX);
 
   ledcWrite(CH_LEFT,  dutyLeft);
   ledcWrite(CH_RIGHT, dutyRight);
@@ -62,7 +70,7 @@ void setup() {
   ledcSetup(CH_RIGHT, PWM_FREQ, PWM_RES);
   ledcAttachPin(PIN_RIGHT, CH_RIGHT);
 
-  setThrottle(0, 0);   // Both channels sit at THROTTLE_ZERO volts on boot
+  setThrottle(0, 0);   // Both channels sit at THROTTLE_REST (~0.8 V) on boot
 
   BP32.setup(&onConnectedController, &onDisconnectedController);
   Serial.println("[LOG] Waiting for PS4 controller...");
@@ -108,10 +116,12 @@ void loop() {
 
     setThrottle(leftSpeed, rightSpeed);
 
+    int clL = constrain(leftSpeed,  0, 255);
+    int clR = constrain(rightSpeed, 0, 255);
     Serial.printf("[LOG] Throttle=%d Turn=%d  L=%d R=%d  PWM_L=%d PWM_R=%d\n",
       throttle, turn, leftSpeed, rightSpeed,
-      map(constrain(leftSpeed,  0,255), 0,255, THROTTLE_ZERO, THROTTLE_FULL),
-      map(constrain(rightSpeed, 0,255), 0,255, THROTTLE_ZERO, THROTTLE_FULL));
+      clL == 0 ? THROTTLE_REST : (int)map(clL, 1, 255, THROTTLE_MIN, THROTTLE_MAX),
+      clR == 0 ? THROTTLE_REST : (int)map(clR, 1, 255, THROTTLE_MIN, THROTTLE_MAX));
 
   } else {
     setThrottle(0, 0);
