@@ -1,0 +1,9 @@
+# Generated map files — regenerate with scripts/generate_flc_map.py
+src/couchmo_nav/maps/*.pgm
+src/couchmo_nav/maps/_osm_cache.json
+
+# ROS build artifacts
+build/
+install/
+log/
+simulation/src/couchmo_nav/maps/*.pgm

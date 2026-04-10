@@ -1,0 +1,491 @@
+<?xml version="1.0"?>
+<!--
+  folsom_lake_college.world  —  Gazebo Classic 11
+  Approximate layout of Folsom Lake College, Folsom CA
+  Scale: 1:1 meters, world spans ~180m W × 140m N
+  Origin (0,0) = center of main quad
+
+  Simplified building footprints based on general campus structure:
+    - Main quad / central plaza
+    - Library (NW)
+    - Science & Math (NE)
+    - Student Services / Admin (SW)
+    - Arts & Humanities (SE)
+    - Gymnasium / PE (far north)
+    - Main campus road loop
+    - East & West parking lots
+    - Trees, benches, signs as navigation obstacles
+
+  Pathways are 5–6m wide to accommodate the couch (1.83m) with clearance.
+-->
+<sdf version="1.6">
+  <world name="folsom_lake_college">
+
+    <physics type="ode">
+      <max_step_size>0.001</max_step_size>
+      <real_time_factor>1.0</real_time_factor>
+      <real_time_update_rate>1000</real_time_update_rate>
+    </physics>
+
+    <include><uri>model://sun</uri></include>
+    <include><uri>model://ground_plane</uri></include>
+
+    <!-- ══════════════════════════════════════════════════════
+         CAMPUS PERIMETER ROAD  (concrete, no wall — open campus)
+         Represented as raised curb strips 0.15m tall
+    ══════════════════════════════════════════════════════════ -->
+
+    <!-- South perimeter road / main entrance corridor -->
+    <!-- Entry road: 8m wide, runs N-S at x=0 from y=-70 to quad -->
+    <!-- Curb east side of entry road -->
+    <model name="curb_entry_east">
+      <static>true</static>
+      <pose>5 -55 0.075 0 0 0</pose>
+      <link name="link">
+        <collision name="col"><geometry><box><size>0.3 30 0.15</size></box></geometry></collision>
+        <visual name="vis">
+          <geometry><box><size>0.3 30 0.15</size></box></geometry>
+          <material><ambient>0.6 0.6 0.6 1</ambient><diffuse>0.6 0.6 0.6 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- Curb west side of entry road -->
+    <model name="curb_entry_west">
+      <static>true</static>
+      <pose>-5 -55 0.075 0 0 0</pose>
+      <link name="link">
+        <collision name="col"><geometry><box><size>0.3 30 0.15</size></box></geometry></collision>
+        <visual name="vis">
+          <geometry><box><size>0.3 30 0.15</size></box></geometry>
+          <material><ambient>0.6 0.6 0.6 1</ambient><diffuse>0.6 0.6 0.6 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- Campus loop road — north section -->
+    <model name="road_north_curb_south">
+      <static>true</static>
+      <pose>0 45 0.075 0 0 0</pose>
+      <link name="link">
+        <collision name="col"><geometry><box><size>120 0.3 0.15</size></box></geometry></collision>
+        <visual name="vis">
+          <geometry><box><size>120 0.3 0.15</size></box></geometry>
+          <material><ambient>0.55 0.55 0.55 1</ambient><diffuse>0.55 0.55 0.55 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- East campus loop road -->
+    <model name="road_east_curb">
+      <static>true</static>
+      <pose>60 5 0.075 0 0 0</pose>
+      <link name="link">
+        <collision name="col"><geometry><box><size>0.3 80 0.15</size></box></geometry></collision>
+        <visual name="vis">
+          <geometry><box><size>0.3 80 0.15</size></box></geometry>
+          <material><ambient>0.55 0.55 0.55 1</ambient><diffuse>0.55 0.55 0.55 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- West campus loop road -->
+    <model name="road_west_curb">
+      <static>true</static>
+      <pose>-60 5 0.075 0 0 0</pose>
+      <link name="link">
+        <collision name="col"><geometry><box><size>0.3 80 0.15</size></box></geometry></collision>
+        <visual name="vis">
+          <geometry><box><size>0.3 80 0.15</size></box></geometry>
+          <material><ambient>0.55 0.55 0.55 1</ambient><diffuse>0.55 0.55 0.55 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- ══════════════════════════════════════════════════════
+         BUILDINGS
+         All 3.5m tall, flat-roofed, concrete/stucco appearance
+    ══════════════════════════════════════════════════════════ -->
+
+    <!-- LIBRARY  —  NW of quad, ~30m × 18m -->
+    <model name="library">
+      <static>true</static>
+      <pose>-32 18 1.75 0 0 0</pose>
+      <link name="link">
+        <collision name="col"><geometry><box><size>30 18 3.5</size></box></geometry></collision>
+        <visual name="vis">
+          <geometry><box><size>30 18 3.5</size></box></geometry>
+          <material><ambient>0.82 0.78 0.72 1</ambient><diffuse>0.82 0.78 0.72 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- Library wing (reading room extension) -->
+    <model name="library_wing">
+      <static>true</static>
+      <pose>-42 10 1.75 0 0 0</pose>
+      <link name="link">
+        <collision name="col"><geometry><box><size>10 10 3.5</size></box></geometry></collision>
+        <visual name="vis">
+          <geometry><box><size>10 10 3.5</size></box></geometry>
+          <material><ambient>0.80 0.76 0.70 1</ambient><diffuse>0.80 0.76 0.70 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- SCIENCE & MATH  —  NE, ~35m × 20m -->
+    <model name="science_math">
+      <static>true</static>
+      <pose>30 22 1.75 0 0 0</pose>
+      <link name="link">
+        <collision name="col"><geometry><box><size>35 20 3.5</size></box></geometry></collision>
+        <visual name="vis">
+          <geometry><box><size>35 20 3.5</size></box></geometry>
+          <material><ambient>0.72 0.75 0.80 1</ambient><diffuse>0.72 0.75 0.80 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- Science lab annex -->
+    <model name="science_annex">
+      <static>true</static>
+      <pose>50 12 1.75 0 0 0</pose>
+      <link name="link">
+        <collision name="col"><geometry><box><size>12 16 3.5</size></box></geometry></collision>
+        <visual name="vis">
+          <geometry><box><size>12 16 3.5</size></box></geometry>
+          <material><ambient>0.70 0.73 0.78 1</ambient><diffuse>0.70 0.73 0.78 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- STUDENT SERVICES / ADMIN  —  SW, ~25m × 14m -->
+    <model name="student_services">
+      <static>true</static>
+      <pose>-28 -18 1.75 0 0 0</pose>
+      <link name="link">
+        <collision name="col"><geometry><box><size>25 14 3.5</size></box></geometry></collision>
+        <visual name="vis">
+          <geometry><box><size>25 14 3.5</size></box></geometry>
+          <material><ambient>0.85 0.80 0.74 1</ambient><diffuse>0.85 0.80 0.74 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- ARTS & HUMANITIES  —  SE, ~28m × 16m -->
+    <model name="arts_humanities">
+      <static>true</static>
+      <pose>32 -20 1.75 0 0 0</pose>
+      <link name="link">
+        <collision name="col"><geometry><box><size>28 16 3.5</size></box></geometry></collision>
+        <visual name="vis">
+          <geometry><box><size>28 16 3.5</size></box></geometry>
+          <material><ambient>0.78 0.72 0.82 1</ambient><diffuse>0.78 0.72 0.82 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- GYMNASIUM / PE  —  Far north, ~40m × 28m, taller -->
+    <model name="gymnasium">
+      <static>true</static>
+      <pose>0 60 4.0 0 0 0</pose>
+      <link name="link">
+        <collision name="col"><geometry><box><size>40 28 8.0</size></box></geometry></collision>
+        <visual name="vis">
+          <geometry><box><size>40 28 8.0</size></box></geometry>
+          <material><ambient>0.60 0.62 0.65 1</ambient><diffuse>0.60 0.62 0.65 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- CAFETERIA / STUDENT CENTER  —  North of quad -->
+    <model name="cafeteria">
+      <static>true</static>
+      <pose>-8 35 1.75 0 0 0</pose>
+      <link name="link">
+        <collision name="col"><geometry><box><size>22 12 3.5</size></box></geometry></collision>
+        <visual name="vis">
+          <geometry><box><size>22 12 3.5</size></box></geometry>
+          <material><ambient>0.88 0.83 0.70 1</ambient><diffuse>0.88 0.83 0.70 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- TECHNOLOGY / CTE  —  East mid -->
+    <model name="technology_cte">
+      <static>true</static>
+      <pose>50 -5 1.75 0 0 0</pose>
+      <link name="link">
+        <collision name="col"><geometry><box><size>18 22 3.5</size></box></geometry></collision>
+        <visual name="vis">
+          <geometry><box><size>18 22 3.5</size></box></geometry>
+          <material><ambient>0.74 0.76 0.80 1</ambient><diffuse>0.74 0.76 0.80 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- ══════════════════════════════════════════════════════
+         MAIN QUAD  —  open paved plaza ~20m × 18m at (0,0)
+         Bounded by low planters (0.5m tall × 0.4m wide)
+    ══════════════════════════════════════════════════════════ -->
+
+    <!-- North planter -->
+    <model name="quad_planter_north">
+      <static>true</static>
+      <pose>0 10 0.25 0 0 0</pose>
+      <link name="link">
+        <collision name="col"><geometry><box><size>20 0.4 0.5</size></box></geometry></collision>
+        <visual name="vis">
+          <geometry><box><size>20 0.4 0.5</size></box></geometry>
+          <material><ambient>0.45 0.55 0.35 1</ambient><diffuse>0.45 0.55 0.35 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- South planter -->
+    <model name="quad_planter_south">
+      <static>true</static>
+      <pose>0 -10 0.25 0 0 0</pose>
+      <link name="link">
+        <collision name="col"><geometry><box><size>20 0.4 0.5</size></box></geometry></collision>
+        <visual name="vis">
+          <geometry><box><size>20 0.4 0.5</size></box></geometry>
+          <material><ambient>0.45 0.55 0.35 1</ambient><diffuse>0.45 0.55 0.35 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- ══════════════════════════════════════════════════════
+         TREES  (cylinders, various sizes)
+         Scattered along pathways and in quads
+    ══════════════════════════════════════════════════════════ -->
+
+    <model name="tree_1"><static>true</static><pose>-8 5 2.0 0 0 0</pose>
+      <link name="link">
+        <collision name="col"><geometry><cylinder><radius>0.25</radius><length>4.0</length></cylinder></geometry></collision>
+        <visual name="vis"><geometry><cylinder><radius>0.25</radius><length>4.0</length></cylinder></geometry>
+          <material><ambient>0.35 0.5 0.25 1</ambient><diffuse>0.35 0.5 0.25 1</diffuse></material></visual>
+      </link>
+    </model>
+
+    <model name="tree_2"><static>true</static><pose>8 5 2.0 0 0 0</pose>
+      <link name="link">
+        <collision name="col"><geometry><cylinder><radius>0.25</radius><length>4.0</length></cylinder></geometry></collision>
+        <visual name="vis"><geometry><cylinder><radius>0.25</radius><length>4.0</length></cylinder></geometry>
+          <material><ambient>0.35 0.5 0.25 1</ambient><diffuse>0.35 0.5 0.25 1</diffuse></material></visual>
+      </link>
+    </model>
+
+    <model name="tree_3"><static>true</static><pose>-15 0 2.0 0 0 0</pose>
+      <link name="link">
+        <collision name="col"><geometry><cylinder><radius>0.3</radius><length>4.0</length></cylinder></geometry></collision>
+        <visual name="vis"><geometry><cylinder><radius>0.3</radius><length>4.0</length></cylinder></geometry>
+          <material><ambient>0.3 0.48 0.22 1</ambient><diffuse>0.3 0.48 0.22 1</diffuse></material></visual>
+      </link>
+    </model>
+
+    <model name="tree_4"><static>true</static><pose>15 0 2.0 0 0 0</pose>
+      <link name="link">
+        <collision name="col"><geometry><cylinder><radius>0.3</radius><length>4.0</length></cylinder></geometry></collision>
+        <visual name="vis"><geometry><cylinder><radius>0.3</radius><length>4.0</length></cylinder></geometry>
+          <material><ambient>0.3 0.48 0.22 1</ambient><diffuse>0.3 0.48 0.22 1</diffuse></material></visual>
+      </link>
+    </model>
+
+    <model name="tree_5"><static>true</static><pose>-20 28 2.0 0 0 0</pose>
+      <link name="link">
+        <collision name="col"><geometry><cylinder><radius>0.28</radius><length>4.0</length></cylinder></geometry></collision>
+        <visual name="vis"><geometry><cylinder><radius>0.28</radius><length>4.0</length></cylinder></geometry>
+          <material><ambient>0.32 0.50 0.24 1</ambient><diffuse>0.32 0.50 0.24 1</diffuse></material></visual>
+      </link>
+    </model>
+
+    <model name="tree_6"><static>true</static><pose>20 28 2.0 0 0 0</pose>
+      <link name="link">
+        <collision name="col"><geometry><cylinder><radius>0.28</radius><length>4.0</length></cylinder></geometry></collision>
+        <visual name="vis"><geometry><cylinder><radius>0.28</radius><length>4.0</length></cylinder></geometry>
+          <material><ambient>0.32 0.50 0.24 1</ambient><diffuse>0.32 0.50 0.24 1</diffuse></material></visual>
+      </link>
+    </model>
+
+    <model name="tree_7"><static>true</static><pose>-45 0 2.0 0 0 0</pose>
+      <link name="link">
+        <collision name="col"><geometry><cylinder><radius>0.35</radius><length>5.0</length></cylinder></geometry></collision>
+        <visual name="vis"><geometry><cylinder><radius>0.35</radius><length>5.0</length></cylinder></geometry>
+          <material><ambient>0.30 0.46 0.20 1</ambient><diffuse>0.30 0.46 0.20 1</diffuse></material></visual>
+      </link>
+    </model>
+
+    <model name="tree_8"><static>true</static><pose>45 30 2.0 0 0 0</pose>
+      <link name="link">
+        <collision name="col"><geometry><cylinder><radius>0.32</radius><length>5.0</length></cylinder></geometry></collision>
+        <visual name="vis"><geometry><cylinder><radius>0.32</radius><length>5.0</length></cylinder></geometry>
+          <material><ambient>0.30 0.46 0.20 1</ambient><diffuse>0.30 0.46 0.20 1</diffuse></material></visual>
+      </link>
+    </model>
+
+    <model name="tree_9"><static>true</static><pose>-3 -40 2.0 0 0 0</pose>
+      <link name="link">
+        <collision name="col"><geometry><cylinder><radius>0.25</radius><length>4.0</length></cylinder></geometry></collision>
+        <visual name="vis"><geometry><cylinder><radius>0.25</radius><length>4.0</length></cylinder></geometry>
+          <material><ambient>0.35 0.5 0.25 1</ambient><diffuse>0.35 0.5 0.25 1</diffuse></material></visual>
+      </link>
+    </model>
+
+    <model name="tree_10"><static>true</static><pose>5 -40 2.0 0 0 0</pose>
+      <link name="link">
+        <collision name="col"><geometry><cylinder><radius>0.25</radius><length>4.0</length></cylinder></geometry></collision>
+        <visual name="vis"><geometry><cylinder><radius>0.25</radius><length>4.0</length></cylinder></geometry>
+          <material><ambient>0.35 0.5 0.25 1</ambient><diffuse>0.35 0.5 0.25 1</diffuse></material></visual>
+      </link>
+    </model>
+
+    <!-- ══════════════════════════════════════════════════════
+         BENCHES & SIGNS  (small obstacles along pathways)
+    ══════════════════════════════════════════════════════════ -->
+
+    <!-- Bench near quad -->
+    <model name="bench_1"><static>true</static><pose>-5 7 0.225 0 0 0</pose>
+      <link name="link">
+        <collision name="col"><geometry><box><size>1.8 0.5 0.45</size></box></geometry></collision>
+        <visual name="vis"><geometry><box><size>1.8 0.5 0.45</size></box></geometry>
+          <material><ambient>0.5 0.35 0.2 1</ambient><diffuse>0.5 0.35 0.2 1</diffuse></material></visual>
+      </link>
+    </model>
+
+    <model name="bench_2"><static>true</static><pose>5 7 0.225 0 0 0</pose>
+      <link name="link">
+        <collision name="col"><geometry><box><size>1.8 0.5 0.45</size></box></geometry></collision>
+        <visual name="vis"><geometry><box><size>1.8 0.5 0.45</size></box></geometry>
+          <material><ambient>0.5 0.35 0.2 1</ambient><diffuse>0.5 0.35 0.2 1</diffuse></material></visual>
+      </link>
+    </model>
+
+    <model name="bench_3"><static>true</static><pose>-5 -7 0.225 0 0 0</pose>
+      <link name="link">
+        <collision name="col"><geometry><box><size>1.8 0.5 0.45</size></box></geometry></collision>
+        <visual name="vis"><geometry><box><size>1.8 0.5 0.45</size></box></geometry>
+          <material><ambient>0.5 0.35 0.2 1</ambient><diffuse>0.5 0.35 0.2 1</diffuse></material></visual>
+      </link>
+    </model>
+
+    <!-- Campus sign at main entrance -->
+    <model name="campus_sign"><static>true</static><pose>0 -38 0.9 0 0 0</pose>
+      <link name="link">
+        <collision name="col"><geometry><box><size>4.0 0.3 1.8</size></box></geometry></collision>
+        <visual name="vis"><geometry><box><size>4.0 0.3 1.8</size></box></geometry>
+          <material><ambient>0.15 0.3 0.6 1</ambient><diffuse>0.15 0.3 0.6 1</diffuse></material></visual>
+      </link>
+    </model>
+
+    <!-- Bike racks (thin obstacles) -->
+    <model name="bike_rack_1"><static>true</static><pose>-18 -8 0.5 0 0 0</pose>
+      <link name="link">
+        <collision name="col"><geometry><box><size>2.0 0.15 1.0</size></box></geometry></collision>
+        <visual name="vis"><geometry><box><size>2.0 0.15 1.0</size></box></geometry>
+          <material><ambient>0.5 0.5 0.5 1</ambient><diffuse>0.5 0.5 0.5 1</diffuse></material></visual>
+      </link>
+    </model>
+
+    <model name="bike_rack_2"><static>true</static><pose>22 -10 0.5 0 0 0</pose>
+      <link name="link">
+        <collision name="col"><geometry><box><size>2.0 0.15 1.0</size></box></geometry></collision>
+        <visual name="vis"><geometry><box><size>2.0 0.15 1.0</size></box></geometry>
+          <material><ambient>0.5 0.5 0.5 1</ambient><diffuse>0.5 0.5 0.5 1</diffuse></material></visual>
+      </link>
+    </model>
+
+    <!-- ══════════════════════════════════════════════════════
+         PARKING LOTS  (low curbs only — interior is open for driving)
+    ══════════════════════════════════════════════════════════ -->
+
+    <!-- West parking lot boundary -->
+    <model name="parking_west_north"><static>true</static><pose>-85 10 0.075 0 0 0</pose>
+      <link name="link">
+        <collision name="col"><geometry><box><size>40 0.2 0.15</size></box></geometry></collision>
+        <visual name="vis"><geometry><box><size>40 0.2 0.15</size></box></geometry>
+          <material><ambient>0.55 0.55 0.55 1</ambient><diffuse>0.55 0.55 0.55 1</diffuse></material></visual>
+      </link>
+    </model>
+
+    <model name="parking_west_south"><static>true</static><pose>-85 -35 0.075 0 0 0</pose>
+      <link name="link">
+        <collision name="col"><geometry><box><size>40 0.2 0.15</size></box></geometry></collision>
+        <visual name="vis"><geometry><box><size>40 0.2 0.15</size></box></geometry>
+          <material><ambient>0.55 0.55 0.55 1</ambient><diffuse>0.55 0.55 0.55 1</diffuse></material></visual>
+      </link>
+    </model>
+
+    <!-- Parking lot divider rows (car stop blocks) -->
+    <model name="car_stop_1"><static>true</static><pose>-75 0 0.1 0 0 0</pose>
+      <link name="link">
+        <collision name="col"><geometry><box><size>0.6 2.0 0.2</size></box></geometry></collision>
+        <visual name="vis"><geometry><box><size>0.6 2.0 0.2</size></box></geometry>
+          <material><ambient>0.4 0.4 0.4 1</ambient><diffuse>0.4 0.4 0.4 1</diffuse></material></visual>
+      </link>
+    </model>
+
+    <model name="car_stop_2"><static>true</static><pose>-75 -6 0.1 0 0 0</pose>
+      <link name="link">
+        <collision name="col"><geometry><box><size>0.6 2.0 0.2</size></box></geometry></collision>
+        <visual name="vis"><geometry><box><size>0.6 2.0 0.2</size></box></geometry>
+          <material><ambient>0.4 0.4 0.4 1</ambient><diffuse>0.4 0.4 0.4 1</diffuse></material></visual>
+      </link>
+    </model>
+
+    <model name="car_stop_3"><static>true</static><pose>-75 -12 0.1 0 0 0</pose>
+      <link name="link">
+        <collision name="col"><geometry><box><size>0.6 2.0 0.2</size></box></geometry></collision>
+        <visual name="vis"><geometry><box><size>0.6 2.0 0.2</size></box></geometry>
+          <material><ambient>0.4 0.4 0.4 1</ambient><diffuse>0.4 0.4 0.4 1</diffuse></material></visual>
+      </link>
+    </model>
+
+    <!-- East parking lot boundary -->
+    <model name="parking_east_north"><static>true</static><pose>85 10 0.075 0 0 0</pose>
+      <link name="link">
+        <collision name="col"><geometry><box><size>40 0.2 0.15</size></box></geometry></collision>
+        <visual name="vis"><geometry><box><size>40 0.2 0.15</size></box></geometry>
+          <material><ambient>0.55 0.55 0.55 1</ambient><diffuse>0.55 0.55 0.55 1</diffuse></material></visual>
+      </link>
+    </model>
+
+    <!-- ══════════════════════════════════════════════════════
+         DYNAMIC OBSTACLES  —  students walking on campus
+    ══════════════════════════════════════════════════════════ -->
+
+    <model name="student_1">
+      <static>false</static>
+      <pose>3 -5 0.9 0 0 0</pose>
+      <link name="link">
+        <inertial><mass>65</mass><inertia><ixx>8</ixx><iyy>8</iyy><izz>1.5</izz></inertia></inertial>
+        <collision name="col"><geometry><cylinder><radius>0.22</radius><length>1.8</length></cylinder></geometry></collision>
+        <visual name="vis"><geometry><cylinder><radius>0.22</radius><length>1.8</length></cylinder></geometry>
+          <material><ambient>0.6 0.4 0.8 1</ambient><diffuse>0.6 0.4 0.8 1</diffuse></material></visual>
+      </link>
+    </model>
+
+    <model name="student_2">
+      <static>false</static>
+      <pose>-6 3 0.9 0 0 0</pose>
+      <link name="link">
+        <inertial><mass>70</mass><inertia><ixx>9</ixx><iyy>9</iyy><izz>1.8</izz></inertia></inertial>
+        <collision name="col"><geometry><cylinder><radius>0.22</radius><length>1.8</length></cylinder></geometry></collision>
+        <visual name="vis"><geometry><cylinder><radius>0.22</radius><length>1.8</length></cylinder></geometry>
+          <material><ambient>0.8 0.5 0.3 1</ambient><diffuse>0.8 0.5 0.3 1</diffuse></material></visual>
+      </link>
+    </model>
+
+    <model name="student_3">
+      <static>false</static>
+      <pose>10 -15 0.9 0 0 0</pose>
+      <link name="link">
+        <inertial><mass>60</mass><inertia><ixx>7</ixx><iyy>7</iyy><izz>1.2</izz></inertia></inertial>
+        <collision name="col"><geometry><cylinder><radius>0.22</radius><length>1.8</length></cylinder></geometry></collision>
+        <visual name="vis"><geometry><cylinder><radius>0.22</radius><length>1.8</length></cylinder></geometry>
+          <material><ambient>0.3 0.6 0.7 1</ambient><diffuse>0.3 0.6 0.7 1</diffuse></material></visual>
+      </link>
+    </model>
+
+  </world>
+</sdf>

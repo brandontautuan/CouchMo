@@ -1,0 +1,26 @@
+FROM osrf/ros:humble-desktop-full
+
+# Install ROS packages + virtual display + noVNC
+RUN apt-get update -q && apt-get install -y -q \
+    ros-humble-xacro \
+    ros-humble-joint-state-publisher \
+    ros-humble-robot-state-publisher \
+    ros-humble-rviz2 \
+    xvfb \
+    x11vnc \
+    novnc \
+    websockify \
+    && rm -rf /var/lib/apt/lists/*
+
+# Build the ROS package
+COPY src /ros2_ws/src
+RUN /bin/bash -c "source /opt/ros/humble/setup.bash && \
+    cd /ros2_ws && \
+    colcon build --symlink-install --packages-select couchmo_description"
+
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+EXPOSE 6080
+
+ENTRYPOINT ["/entrypoint.sh"]

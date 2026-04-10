@@ -1,0 +1,116 @@
+Panels:
+  - Class: rviz_common/Displays
+    Help Height: 78
+    Name: Displays
+    Property Tree Widget:
+      Expanded:
+        - /RobotModel1
+        - /LIDAR Scan1
+        - /Map1
+      Splitter Ratio: 0.55
+    Tree Height: 700
+
+Visualization Manager:
+  Class: ""
+  Displays:
+    - Alpha: 1
+      Cell Size: 0.5
+      Class: rviz_default_plugins/Grid
+      Color: 80; 80; 80
+      Name: Grid
+      Plane: XY
+      Plane Cell Count: 30
+      Value: true
+
+    - Alpha: 1
+      Class: rviz_default_plugins/RobotModel
+      Description Source: Topic
+      Description Topic: /robot_description
+      Name: RobotModel
+      Value: true
+
+    - Class: rviz_default_plugins/TF
+      Name: TF
+      Value: false
+      Marker Scale: 0.15
+
+    - Class: rviz_default_plugins/LaserScan
+      Name: LIDAR Scan
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Best Effort
+        Value: /scan
+      Alpha: 1
+      Color: 255; 50; 50
+      Color Transformer: FlatColor
+      Style: Points
+      Size (m): 0.05
+      Value: true
+
+    - Alpha: 0.7
+      Class: rviz_default_plugins/Map
+      Color Scheme: map
+      Name: Map
+      Topic:
+        Depth: 1
+        Durability Policy: Transient Local
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /map
+      Value: true
+
+    - Alpha: 0.4
+      Class: rviz_default_plugins/Map
+      Color Scheme: costmap
+      Name: Local Costmap
+      Topic:
+        Depth: 1
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /local_costmap/costmap
+      Value: true
+
+    - Alpha: 0.3
+      Class: rviz_default_plugins/Map
+      Color Scheme: costmap
+      Name: Global Costmap
+      Topic:
+        Depth: 1
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /global_costmap/costmap
+      Value: true
+
+    - Class: rviz_default_plugins/Odometry
+      Name: Odometry
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Best Effort
+        Value: /odom
+      Keep: 50
+      Value: true
+
+    - Class: nav2_rviz_plugins/Nav2Panel
+      Name: Navigation
+      Value: true
+
+  Global Options:
+    Background Color: 20; 20; 25
+    Fixed Frame: map
+    Frame Rate: 30
+
+  Views:
+    Current:
+      Class: rviz_default_plugins/TopDownOrtho
+      Name: Top-Down Map View
+      Scale: 40
+      Target Frame: base_link
+      Value: TopDownOrtho (rviz)
+      X: 0
+      Y: 0

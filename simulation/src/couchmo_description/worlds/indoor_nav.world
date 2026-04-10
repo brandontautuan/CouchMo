@@ -1,0 +1,243 @@
+<?xml version="1.0"?>
+<!--
+  indoor_nav.world  —  Gazebo Classic 11 (ROS 2 Humble)
+  12m × 10m living room + 2m wide hallway, furniture obstacles, one dynamic person
+-->
+<sdf version="1.6">
+  <world name="couchmo_indoor">
+
+    <physics type="ode">
+      <max_step_size>0.001</max_step_size>
+      <real_time_factor>1.0</real_time_factor>
+      <real_time_update_rate>1000</real_time_update_rate>
+      <ode>
+        <solver>
+          <type>quick</type>
+          <iters>50</iters>
+        </solver>
+      </ode>
+    </physics>
+
+    <!-- Lighting -->
+    <include><uri>model://sun</uri></include>
+
+    <!-- Ground plane -->
+    <include><uri>model://ground_plane</uri></include>
+
+    <!-- ── South wall ──────────────────────────────── -->
+    <model name="wall_south">
+      <static>true</static>
+      <pose>0 -5 1.5 0 0 0</pose>
+      <link name="link">
+        <collision name="col">
+          <geometry><box><size>12 0.2 3</size></box></geometry>
+        </collision>
+        <visual name="vis">
+          <geometry><box><size>12 0.2 3</size></box></geometry>
+          <material>
+            <ambient>0.9 0.9 0.88 1</ambient>
+            <diffuse>0.9 0.9 0.88 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- ── North wall ──────────────────────────────── -->
+    <model name="wall_north">
+      <static>true</static>
+      <pose>0 5 1.5 0 0 0</pose>
+      <link name="link">
+        <collision name="col">
+          <geometry><box><size>12 0.2 3</size></box></geometry>
+        </collision>
+        <visual name="vis">
+          <geometry><box><size>12 0.2 3</size></box></geometry>
+          <material>
+            <ambient>0.9 0.9 0.88 1</ambient>
+            <diffuse>0.9 0.9 0.88 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- ── West wall ───────────────────────────────── -->
+    <model name="wall_west">
+      <static>true</static>
+      <pose>-6 0 1.5 0 0 0</pose>
+      <link name="link">
+        <collision name="col">
+          <geometry><box><size>0.2 10 3</size></box></geometry>
+        </collision>
+        <visual name="vis">
+          <geometry><box><size>0.2 10 3</size></box></geometry>
+          <material>
+            <ambient>0.9 0.9 0.88 1</ambient>
+            <diffuse>0.9 0.9 0.88 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- ── East wall (with 1.2m doorway at y=0) ───── -->
+    <model name="wall_east_north">
+      <static>true</static>
+      <pose>6 3.1 1.5 0 0 0</pose>
+      <link name="link">
+        <collision name="col">
+          <geometry><box><size>0.2 3.8 3</size></box></geometry>
+        </collision>
+        <visual name="vis">
+          <geometry><box><size>0.2 3.8 3</size></box></geometry>
+          <material>
+            <ambient>0.9 0.9 0.88 1</ambient>
+            <diffuse>0.9 0.9 0.88 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="wall_east_south">
+      <static>true</static>
+      <pose>6 -3.1 1.5 0 0 0</pose>
+      <link name="link">
+        <collision name="col">
+          <geometry><box><size>0.2 3.8 3</size></box></geometry>
+        </collision>
+        <visual name="vis">
+          <geometry><box><size>0.2 3.8 3</size></box></geometry>
+          <material>
+            <ambient>0.9 0.9 0.88 1</ambient>
+            <diffuse>0.9 0.9 0.88 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- ── Hallway ─────────────────────────────────── -->
+    <model name="hallway_wall_north">
+      <static>true</static>
+      <pose>10 1.1 1.5 0 0 0</pose>
+      <link name="link">
+        <collision name="col">
+          <geometry><box><size>8 0.2 3</size></box></geometry>
+        </collision>
+        <visual name="vis">
+          <geometry><box><size>8 0.2 3</size></box></geometry>
+          <material>
+            <ambient>0.85 0.85 0.82 1</ambient>
+            <diffuse>0.85 0.85 0.82 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="hallway_wall_south">
+      <static>true</static>
+      <pose>10 -1.1 1.5 0 0 0</pose>
+      <link name="link">
+        <collision name="col">
+          <geometry><box><size>8 0.2 3</size></box></geometry>
+        </collision>
+        <visual name="vis">
+          <geometry><box><size>8 0.2 3</size></box></geometry>
+          <material>
+            <ambient>0.85 0.85 0.82 1</ambient>
+            <diffuse>0.85 0.85 0.82 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="hallway_end_wall">
+      <static>true</static>
+      <pose>14.1 0 1.5 0 0 0</pose>
+      <link name="link">
+        <collision name="col">
+          <geometry><box><size>0.2 2.2 3</size></box></geometry>
+        </collision>
+        <visual name="vis">
+          <geometry><box><size>0.2 2.2 3</size></box></geometry>
+          <material>
+            <ambient>0.85 0.85 0.82 1</ambient>
+            <diffuse>0.85 0.85 0.82 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- ── Furniture obstacles ─────────────────────── -->
+    <model name="coffee_table">
+      <static>true</static>
+      <pose>-2 1.5 0.225 0 0 0</pose>
+      <link name="link">
+        <collision name="col">
+          <geometry><box><size>0.9 0.5 0.45</size></box></geometry>
+        </collision>
+        <visual name="vis">
+          <geometry><box><size>0.9 0.5 0.45</size></box></geometry>
+          <material>
+            <ambient>0.55 0.35 0.15 1</ambient>
+            <diffuse>0.55 0.35 0.15 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="tv_stand">
+      <static>true</static>
+      <pose>1 4.7 0.3 0 0 0</pose>
+      <link name="link">
+        <collision name="col">
+          <geometry><box><size>1.5 0.4 0.6</size></box></geometry>
+        </collision>
+        <visual name="vis">
+          <geometry><box><size>1.5 0.4 0.6</size></box></geometry>
+          <material>
+            <ambient>0.2 0.2 0.2 1</ambient>
+            <diffuse>0.2 0.2 0.2 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="plant_pot">
+      <static>true</static>
+      <pose>-4 3 0.4 0 0 0</pose>
+      <link name="link">
+        <collision name="col">
+          <geometry><cylinder><radius>0.2</radius><length>0.8</length></cylinder></geometry>
+        </collision>
+        <visual name="vis">
+          <geometry><cylinder><radius>0.2</radius><length>0.8</length></cylinder></geometry>
+          <material>
+            <ambient>0.2 0.55 0.2 1</ambient>
+            <diffuse>0.2 0.55 0.2 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- Dynamic person obstacle -->
+    <model name="person_1">
+      <static>false</static>
+      <pose>2 -2 0.9 0 0 0</pose>
+      <link name="link">
+        <inertial>
+          <mass>70</mass>
+          <inertia><ixx>10</ixx><iyy>10</iyy><izz>2</izz></inertia>
+        </inertial>
+        <collision name="col">
+          <geometry><cylinder><radius>0.25</radius><length>1.8</length></cylinder></geometry>
+        </collision>
+        <visual name="vis">
+          <geometry><cylinder><radius>0.25</radius><length>1.8</length></cylinder></geometry>
+          <material>
+            <ambient>0.7 0.5 0.3 1</ambient>
+            <diffuse>0.7 0.5 0.3 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+  </world>
+</sdf>
