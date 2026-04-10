@@ -4,7 +4,7 @@ project(couchmo_description)
 find_package(ament_cmake REQUIRED)
 
 install(
-  DIRECTORY urdf launch worlds rviz config meshes
+  DIRECTORY urdf launch worlds rviz
   DESTINATION share/${PROJECT_NAME}
 )
 
