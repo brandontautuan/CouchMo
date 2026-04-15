@@ -12,14 +12,17 @@ const int CH_LEFT  = 0;
 const int CH_RIGHT = 1;
 
 // ---------------------------------------------------------------
-// Throttle voltage calibration  (PWM + level-shifter to 5 V)
-//   THROTTLE_REST  — below the "go" threshold.       ~0.8 V → duty 41
-//   THROTTLE_MIN   — minimum recognised speed.       ~1.1 V → duty 56
-//   THROTTLE_MAX   — full speed.                     ~4.2 V → duty 214
+// Throttle voltage calibration
+//   PWM (8-bit) → low-pass → level-shifter (0–4.856 V ref from controller)
+//   V_out = (duty / 255) × 4.856 V   →   duty = V_target × 255 / 4.856
+//
+//   THROTTLE_REST  — 0 V, well below the 1.1 V "go" threshold
+//   THROTTLE_MIN   — ~1.1 V (minimum recognised speed)   → duty 58
+//   THROTTLE_MAX   — ~4.2 V (full speed)                 → duty 220
 // ---------------------------------------------------------------
-#define THROTTLE_REST     41
-#define THROTTLE_MIN      56
-#define THROTTLE_MAX      214
+#define THROTTLE_REST     0
+#define THROTTLE_MIN      58
+#define THROTTLE_MAX      220
 
 // --- Mode switching & UART watchdog ---
 #define MODE_SWITCH_MS    5000    // Hold triangle for 5 s to toggle
@@ -110,10 +113,9 @@ void onConnectedController(ControllerPtr ctl) {
 
 void onDisconnectedController(ControllerPtr ctl) {
   myController = nullptr;
-  if (currentMode == MODE_CONTROLLER) {
-    setThrottle(0, 0);
-  }
-  Serial.println("[LOG] PS4 controller disconnected.");
+  setThrottle(0, 0);
+  currentMode = MODE_CONTROLLER;
+  Serial.println("[LOG] PS4 controller disconnected — motors disabled, reverted to CONTROLLER mode.");
 }
 
 // ---------------------------------------------------------------
