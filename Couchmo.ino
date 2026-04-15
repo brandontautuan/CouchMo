@@ -6,8 +6,8 @@
 #define PIN_LEFT          2
 #define PIN_RIGHT         13
 
-const int PWM_FREQ = 5000;
-const int PWM_RES  = 8;      // 8-bit (0–255)
+const int PWM_FREQ = 10000;  // 10kHz to "trick" the controller into thinking it is recieving analog input
+const int PWM_RES  = 8;      // 8-bit (0–255) (reasonable for 10kHz)
 const int CH_LEFT  = 0;
 const int CH_RIGHT = 1;
 
