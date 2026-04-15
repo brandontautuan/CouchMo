@@ -1,0 +1,30 @@
+FROM osrf/ros:humble-desktop-full
+
+# Install Gazebo/ROS simulation + navigation tooling and browser display stack.
+RUN apt-get update -q && apt-get install -y -q \
+    ros-humble-gazebo-ros-pkgs \
+    ros-humble-xacro \
+    ros-humble-joint-state-publisher \
+    ros-humble-robot-state-publisher \
+    ros-humble-rviz2 \
+    ros-humble-nav2-bringup \
+    ros-humble-slam-toolbox \
+    ros-humble-teleop-twist-keyboard \
+    xvfb \
+    x11vnc \
+    novnc \
+    websockify \
+    && rm -rf /var/lib/apt/lists/*
+
+# Build all local Couchmo ROS packages into /ros2_ws/install.
+COPY src /ros2_ws/src
+RUN /bin/bash -c "source /opt/ros/humble/setup.bash && \
+    cd /ros2_ws && \
+    colcon build --symlink-install"
+
+COPY entrypoint.sim.sh /entrypoint.sim.sh
+RUN sed -i 's/\r//' /entrypoint.sim.sh && chmod +x /entrypoint.sim.sh
+
+EXPOSE 6080
+
+ENTRYPOINT ["/entrypoint.sim.sh"]
