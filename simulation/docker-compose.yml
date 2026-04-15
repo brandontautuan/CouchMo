@@ -1,0 +1,36 @@
+# Couchmo simulation stack
+# Requires: XQuartz running on macOS (see README / run.sh)
+# Usage: ./run.sh   (first time)
+#        docker compose up sim   (subsequent runs)
+
+services:
+
+  # ── Full sim: Gazebo + SLAM + Nav2 + RViz (Phase 3) ────
+  sim:
+    build:
+      context: .
+      dockerfile: Dockerfile.sim
+    container_name: couchmo_sim
+    environment:
+      - ROS_DOMAIN_ID=42
+    ports:
+      - "6081:6080"   # browser: http://localhost:6081/vnc.html
+    stdin_open: true
+    tty: true
+
+  # ── URDF preview — browser-based via noVNC ──────────────
+  preview:
+    build:
+      context: .
+      dockerfile: Dockerfile.preview
+    container_name: couchmo_preview
+    environment:
+      - ROS_DOMAIN_ID=42
+    ports:
+      - "6080:6080"
+    stdin_open: true
+    tty: true
+
+volumes:
+  couchmo_sim_build:
+  couchmo_sim_install:

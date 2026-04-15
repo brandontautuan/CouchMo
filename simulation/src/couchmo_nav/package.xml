@@ -1,0 +1,14 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>couchmo_nav</name>
+  <version>0.1.0</version>
+  <description>Nav2 configuration and navigation launch for Couchmo</description>
+  <maintainer email="you@example.com">Couchmo Team</maintainer>
+  <license>MIT</license>
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <exec_depend>nav2_bringup</exec_depend>
+  <exec_depend>slam_toolbox</exec_depend>
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

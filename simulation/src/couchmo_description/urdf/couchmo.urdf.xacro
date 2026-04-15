@@ -1,0 +1,389 @@
+<?xml version="1.0"?>
+<!--
+  couchmo.urdf.xacro
+  Self-Driving Couch — URDF model for ROS 2 Humble / Gazebo Fortress
+
+  All dimensions converted from imperial spec:
+    Exterior body : 72" W × 34" D × 28" H  →  1.8288 × 0.8636 × 0.7112 m
+    Base footprint: 60.75" × 32.5"          →  1.5431 × 0.8255 m
+    Interior void : 53.5" × 30.625"         →  1.3589 × 0.7779 m
+
+  Drive configuration: Differential drive, two 8" pneumatic rear wheels + two front casters
+  Sensor mounts: RPLidar A3 under front skirt (hidden), IMU in chassis
+-->
+<robot name="couchmo" xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+  <!-- ═══════════════════════════════════════════════
+       PROPERTIES
+  ══════════════════════════════════════════════════ -->
+
+  <!-- Body dimensions (meters) -->
+  <xacro:property name="body_w"  value="1.8288"/>   <!-- 72"  width  -->
+  <xacro:property name="body_d"  value="0.8636"/>   <!-- 34"  depth  -->
+  <xacro:property name="body_h"  value="0.7112"/>   <!-- 28"  height -->
+
+  <!-- Chassis plate sits at ground clearance height -->
+  <xacro:property name="ground_clearance" value="0.06"/>   <!-- 60 mm -->
+  <xacro:property name="chassis_h"        value="0.05"/>   <!-- chassis plate thickness -->
+
+  <!-- Drive wheels: 8" diameter = 0.2032 m radius 0.1016 m, width 0.07 m -->
+  <xacro:property name="wheel_r"   value="0.1016"/>
+  <xacro:property name="wheel_w"   value="0.07"/>
+  <!-- Wheel axle Y offset from body centerline (inside void, near rear) -->
+  <xacro:property name="wheel_y_offset" value="0.72"/>   <!-- ±720 mm from center -->
+  <xacro:property name="wheel_x_offset" value="-0.25"/>  <!-- rear of body -->
+
+  <!-- Caster wheels: 3" diameter = 0.0762 m, front corners -->
+  <xacro:property name="caster_r"    value="0.0381"/>
+  <xacro:property name="caster_x"    value="0.55"/>   <!-- forward of center -->
+  <xacro:property name="caster_y"    value="0.68"/>   <!-- inboard of drive wheels -->
+
+  <!-- Masses (kg) — couch body ~45 kg, each wheel ~2 kg, rider up to 130 kg -->
+  <xacro:property name="body_mass"   value="45.0"/>
+  <xacro:property name="wheel_mass"  value="2.0"/>
+  <xacro:property name="caster_mass" value="0.4"/>
+
+  <!-- ═══════════════════════════════════════════════
+       INERTIA MACROS
+  ══════════════════════════════════════════════════ -->
+
+  <xacro:macro name="box_inertia" params="m w d h">
+    <inertial>
+      <mass value="${m}"/>
+      <inertia
+        ixx="${m*(d*d + h*h)/12}"  ixy="0" ixz="0"
+        iyy="${m*(w*w + h*h)/12}"  iyz="0"
+        izz="${m*(w*w + d*d)/12}"/>
+    </inertial>
+  </xacro:macro>
+
+  <xacro:macro name="cylinder_inertia" params="m r h">
+    <inertial>
+      <mass value="${m}"/>
+      <inertia
+        ixx="${m*(3*r*r + h*h)/12}" ixy="0" ixz="0"
+        iyy="${m*(3*r*r + h*h)/12}" iyz="0"
+        izz="${m*r*r/2}"/>
+    </inertial>
+  </xacro:macro>
+
+  <xacro:macro name="sphere_inertia" params="m r">
+    <inertial>
+      <mass value="${m}"/>
+      <inertia
+        ixx="${2*m*r*r/5}" ixy="0" ixz="0"
+        iyy="${2*m*r*r/5}" iyz="0"
+        izz="${2*m*r*r/5}"/>
+    </inertial>
+  </xacro:macro>
+
+  <!-- ═══════════════════════════════════════════════
+       BASE LINK  (reference frame at floor projection of CoG)
+  ══════════════════════════════════════════════════ -->
+
+  <link name="base_link">
+    <visual>
+      <geometry><box size="0.01 0.01 0.01"/></geometry>
+    </visual>
+  </link>
+
+  <!-- ═══════════════════════════════════════════════
+       CHASSIS  (the hidden steel frame inside the void)
+  ══════════════════════════════════════════════════ -->
+
+  <joint name="base_to_chassis" type="fixed">
+    <parent link="base_link"/>
+    <child  link="chassis_link"/>
+    <origin xyz="0 0 ${wheel_r}" rpy="0 0 0"/>
+  </joint>
+
+  <link name="chassis_link">
+    <xacro:box_inertia m="${body_mass}" w="1.3589" d="0.7779" h="${chassis_h}"/>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="1.3589 0.7779 ${chassis_h}"/>
+      </geometry>
+      <material name="steel_grey">
+        <color rgba="0.4 0.4 0.4 1.0"/>
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="1.3589 0.7779 ${chassis_h}"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <!-- ═══════════════════════════════════════════════
+       COUCH BODY  (full exterior shell — visual + collision)
+       Split into: base/skirt, seat, back, left arm, right arm
+  ══════════════════════════════════════════════════ -->
+
+  <joint name="chassis_to_body" type="fixed">
+    <parent link="chassis_link"/>
+    <child  link="couch_body"/>
+    <origin xyz="0 0 ${chassis_h/2 + (body_h - wheel_r)/2}" rpy="0 0 0"/>
+  </joint>
+
+  <link name="couch_body">
+    <!-- Seat cushion volume (lower 40% of height) -->
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="${body_w} ${body_d} ${body_h * 0.40}"/>
+      </geometry>
+      <material name="fabric_charcoal">
+        <color rgba="0.20 0.20 0.22 1.0"/>
+      </material>
+    </visual>
+    <!-- Back rest (upper 55%, rear 35% of depth) -->
+    <visual>
+      <origin xyz="0 ${-body_d*0.325} ${body_h*0.475}" rpy="0 0 0"/>
+      <geometry>
+        <box size="${body_w} ${body_d*0.35} ${body_h*0.55}"/>
+      </geometry>
+      <material name="fabric_charcoal">
+        <color rgba="0.20 0.20 0.22 1.0"/>
+      </material>
+    </visual>
+    <!-- Left armrest -->
+    <visual>
+      <origin xyz="${body_w/2 - 0.1} 0 ${body_h*0.20}" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.20 ${body_d} ${body_h*0.60}"/>
+      </geometry>
+      <material name="fabric_charcoal">
+        <color rgba="0.20 0.20 0.22 1.0"/>
+      </material>
+    </visual>
+    <!-- Right armrest -->
+    <visual>
+      <origin xyz="${-(body_w/2 - 0.1)} 0 ${body_h*0.20}" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.20 ${body_d} ${body_h*0.60}"/>
+      </geometry>
+      <material name="fabric_charcoal">
+        <color rgba="0.20 0.20 0.22 1.0"/>
+      </material>
+    </visual>
+    <!-- Unified collision box (conservative hull) -->
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="${body_w} ${body_d} ${body_h}"/>
+      </geometry>
+    </collision>
+    <xacro:box_inertia m="5.0" w="${body_w}" d="${body_d}" h="${body_h}"/>
+  </link>
+
+  <!-- ═══════════════════════════════════════════════
+       DRIVE WHEEL MACRO
+  ══════════════════════════════════════════════════ -->
+
+  <xacro:macro name="drive_wheel" params="name side reflect">
+    <joint name="${name}_joint" type="continuous">
+      <parent link="chassis_link"/>
+      <child  link="${name}_link"/>
+      <origin xyz="${wheel_x_offset} ${reflect * wheel_y_offset} 0" rpy="0 0 0"/>
+      <axis xyz="0 1 0"/>
+      <dynamics damping="0.05" friction="0.1"/>
+    </joint>
+
+    <link name="${name}_link">
+      <xacro:cylinder_inertia m="${wheel_mass}" r="${wheel_r}" h="${wheel_w}"/>
+      <visual>
+        <origin xyz="0 0 0" rpy="${pi/2} 0 0"/>
+        <geometry>
+          <cylinder radius="${wheel_r}" length="${wheel_w}"/>
+        </geometry>
+        <material name="rubber_black">
+          <color rgba="0.10 0.10 0.10 1.0"/>
+        </material>
+      </visual>
+      <collision>
+        <origin xyz="0 0 0" rpy="${pi/2} 0 0"/>
+        <geometry>
+          <cylinder radius="${wheel_r}" length="${wheel_w}"/>
+        </geometry>
+      </collision>
+    </link>
+
+    <!-- Gazebo friction for drive wheel -->
+    <gazebo reference="${name}_link">
+      <mu1>1.2</mu1>
+      <mu2>0.8</mu2>
+      <kp>1e6</kp>
+      <kd>100</kd>
+    </gazebo>
+  </xacro:macro>
+
+  <xacro:drive_wheel name="left_wheel"  side="left"  reflect="1"/>
+  <xacro:drive_wheel name="right_wheel" side="right" reflect="-1"/>
+
+  <!-- ═══════════════════════════════════════════════
+       CASTER WHEEL MACRO  (passive, ball-type)
+  ══════════════════════════════════════════════════ -->
+
+  <xacro:macro name="caster_wheel" params="name x_sign y_sign">
+    <joint name="${name}_joint" type="fixed">
+      <parent link="chassis_link"/>
+      <child  link="${name}_link"/>
+      <origin xyz="${x_sign * caster_x} ${y_sign * caster_y} ${-wheel_r + caster_r}" rpy="0 0 0"/>
+    </joint>
+
+    <link name="${name}_link">
+      <xacro:sphere_inertia m="${caster_mass}" r="${caster_r}"/>
+      <visual>
+        <geometry><sphere radius="${caster_r}"/></geometry>
+        <material name="caster_grey">
+          <color rgba="0.6 0.6 0.6 1.0"/>
+        </material>
+      </visual>
+      <collision>
+        <geometry><sphere radius="${caster_r}"/></geometry>
+      </collision>
+    </link>
+
+    <gazebo reference="${name}_link">
+      <mu1>0.01</mu1>
+      <mu2>0.01</mu2>
+    </gazebo>
+  </xacro:macro>
+
+  <xacro:caster_wheel name="front_left_caster"  x_sign="1"  y_sign="1"/>
+  <xacro:caster_wheel name="front_right_caster" x_sign="1"  y_sign="-1"/>
+
+  <!-- ═══════════════════════════════════════════════
+       IMU LINK  (mounted on chassis, center)
+  ══════════════════════════════════════════════════ -->
+
+  <joint name="imu_joint" type="fixed">
+    <parent link="chassis_link"/>
+    <child  link="imu_link"/>
+    <origin xyz="0 0 0.02" rpy="0 0 0"/>
+  </joint>
+
+  <link name="imu_link">
+    <visual>
+      <geometry><box size="0.04 0.04 0.01"/></geometry>
+      <material name="pcb_green"><color rgba="0.1 0.5 0.1 1.0"/></material>
+    </visual>
+    <inertial>
+      <mass value="0.05"/>
+      <inertia ixx="1e-6" ixy="0" ixz="0" iyy="1e-6" iyz="0" izz="1e-6"/>
+    </inertial>
+  </link>
+
+  <!-- ═══════════════════════════════════════════════
+       LIDAR LINK  (hidden under front skirt, pointing forward/down sweep)
+       Physical: RPLidar A3 — 360° scan, 25m range
+       Mounted 30mm above ground at front center, angled 0°
+  ══════════════════════════════════════════════════ -->
+
+  <joint name="lidar_joint" type="fixed">
+    <parent link="chassis_link"/>
+    <child  link="lidar_link"/>
+    <!-- 50 mm behind front edge of chassis void, 80 mm above chassis plate -->
+    <origin xyz="0.62 0 0.08" rpy="0 0 0"/>
+  </joint>
+
+  <link name="lidar_link">
+    <visual>
+      <geometry><cylinder radius="0.038" length="0.056"/></geometry>
+      <material name="lidar_white"><color rgba="0.9 0.9 0.9 1.0"/></material>
+    </visual>
+    <inertial>
+      <mass value="0.18"/>
+      <inertia ixx="1e-4" ixy="0" ixz="0" iyy="1e-4" iyz="0" izz="1e-4"/>
+    </inertial>
+  </link>
+
+  <!-- ═══════════════════════════════════════════════
+       GAZEBO PLUGINS
+  ══════════════════════════════════════════════════ -->
+
+  <!-- Differential drive controller -->
+  <gazebo>
+    <plugin name="diff_drive" filename="libgazebo_ros_diff_drive.so">
+      <update_rate>50</update_rate>
+      <left_joint>left_wheel_joint</left_joint>
+      <right_joint>right_wheel_joint</right_joint>
+      <wheel_separation>${wheel_y_offset * 2}</wheel_separation>
+      <wheel_diameter>${wheel_r * 2}</wheel_diameter>
+      <max_wheel_torque>40</max_wheel_torque>
+      <max_wheel_acceleration>2.0</max_wheel_acceleration>
+      <command_topic>cmd_vel</command_topic>
+      <publish_odom>true</publish_odom>
+      <publish_odom_tf>true</publish_odom_tf>
+      <publish_wheel_tf>true</publish_wheel_tf>
+      <odometry_topic>odom</odometry_topic>
+      <odometry_frame>odom</odometry_frame>
+      <robot_base_frame>base_link</robot_base_frame>
+    </plugin>
+  </gazebo>
+
+  <!-- RPLidar A3 (2D scan) -->
+  <gazebo reference="lidar_link">
+    <sensor name="lidar" type="ray">
+      <always_on>true</always_on>
+      <visualize>true</visualize>
+      <update_rate>15</update_rate>
+      <ray>
+        <scan>
+          <horizontal>
+            <samples>720</samples>
+            <resolution>1</resolution>
+            <min_angle>-3.14159</min_angle>
+            <max_angle>3.14159</max_angle>
+          </horizontal>
+        </scan>
+        <range>
+          <min>0.15</min>
+          <max>25.0</max>
+          <resolution>0.01</resolution>
+        </range>
+        <noise>
+          <type>gaussian</type>
+          <mean>0.0</mean>
+          <stddev>0.02</stddev>
+        </noise>
+      </ray>
+      <plugin name="lidar_plugin" filename="libgazebo_ros_ray_sensor.so">
+        <ros>
+          <remapping>~/out:=scan</remapping>
+        </ros>
+        <output_type>sensor_msgs/LaserScan</output_type>
+        <frame_name>lidar_link</frame_name>
+      </plugin>
+    </sensor>
+  </gazebo>
+
+  <!-- IMU sensor -->
+  <gazebo reference="imu_link">
+    <sensor name="imu_sensor" type="imu">
+      <always_on>true</always_on>
+      <update_rate>100</update_rate>
+      <plugin name="imu_plugin" filename="libgazebo_ros_imu_sensor.so">
+        <ros>
+          <remapping>~/out:=imu</remapping>
+        </ros>
+        <initial_orientation_as_reference>false</initial_orientation_as_reference>
+      </plugin>
+      <imu>
+        <angular_velocity>
+          <x><noise type="gaussian"><mean>0</mean><stddev>0.009</stddev></noise></x>
+          <y><noise type="gaussian"><mean>0</mean><stddev>0.009</stddev></noise></y>
+          <z><noise type="gaussian"><mean>0</mean><stddev>0.009</stddev></noise></z>
+        </angular_velocity>
+        <linear_acceleration>
+          <x><noise type="gaussian"><mean>0</mean><stddev>0.021</stddev></noise></x>
+          <y><noise type="gaussian"><mean>0</mean><stddev>0.021</stddev></noise></y>
+          <z><noise type="gaussian"><mean>0</mean><stddev>0.021</stddev></noise></z>
+        </linear_acceleration>
+      </imu>
+    </sensor>
+  </gazebo>
+
+</robot>
