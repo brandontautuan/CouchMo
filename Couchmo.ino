@@ -6,27 +6,40 @@
 #define PIN_LEFT          2
 #define PIN_RIGHT         13
 
-const int PWM_FREQ = 10000;  // 10kHz to "trick" the controller into thinking it is recieving analog input
-const int PWM_RES  = 8;      // 8-bit (0–255) (reasonable for 10kHz)
-const int CH_LEFT  = 0;
-const int CH_RIGHT = 1;
+const int PWM_FREQ      = 10000;  // 10 kHz — fast enough for the low-pass to produce a smooth analog voltage
+const int PWM_RES       = 8;      // 8-bit resolution (reasonable for 10 kHz)
+const int PWM_MAX_DUTY  = (1 << PWM_RES) - 1;  // 255 for 8-bit
+const int CH_LEFT       = 0;
+const int CH_RIGHT      = 1;
+
+// --- Joystick Configuration ---
+#define STICK_DEADZONE    20      // Ignore joystick values within ±20 of centre
+#define STICK_MAX         511     // Bluepad32 axis range: -512..511
 
 // ---------------------------------------------------------------
 // Throttle voltage calibration
-//   PWM (8-bit) → low-pass → level-shifter (0–4.856 V ref from controller)
-//   V_out = (duty / 255) × 4.856 V   →   duty = V_target × 255 / 4.856
+//   PWM (8-bit) → low-pass → level-shifter (0–V_REF from controller)
+//   V_out = (duty / PWM_MAX_DUTY) × V_REF
+//   duty  = V_target × PWM_MAX_DUTY / V_REF
 //
-//   THROTTLE_REST  — 0 V, well below the 1.1 V "go" threshold
-//   THROTTLE_MIN   — ~1.1 V (minimum recognised speed)   → duty 58
-//   THROTTLE_MAX   — ~4.2 V (full speed)                 → duty 220
+//   V_GO  — Minimum voltage at which the motor controller actually
+//           drives the wheels.  If the motor is unresponsive at low
+//           throttle, raise this value.  The original 1.1 V estimate
+//           was too low; ~3.3 V matches observed behaviour (motor
+//           starts at roughly throttle input 180/255).
 // ---------------------------------------------------------------
-#define THROTTLE_REST     0
-#define THROTTLE_MIN      58
-#define THROTTLE_MAX      220
+const float V_REF  = 4.856f;   // Controller reference voltage (measured at throttle connector)
+const float V_GO   = 3.3f;     // Measured "go" threshold — raise if motor is still unresponsive
+const float V_FULL = 4.2f;     // Full-speed voltage
+
+const int THROTTLE_REST = 0;
+const int THROTTLE_MIN  = (int)(V_GO   * PWM_MAX_DUTY / V_REF + 0.5f);  // ≈173
+const int THROTTLE_MAX  = (int)(V_FULL * PWM_MAX_DUTY / V_REF + 0.5f);  // ≈220
 
 // --- Mode switching & UART watchdog ---
 #define MODE_SWITCH_MS    5000    // Hold triangle for 5 s to toggle
-#define UART_TIMEOUT_MS   500    // No valid UART command → rest
+#define UART_TIMEOUT_MS   500     // No valid UART command → rest
+#define WARN_INTERVAL_MS  3000    // Minimum interval between repeated log warnings
 
 enum DriveMode { MODE_CONTROLLER, MODE_UART };
 
@@ -36,18 +49,21 @@ unsigned long     triangleHoldStart = 0;
 bool              triangleSwitched  = false;  // Prevents re-firing while held
 unsigned long     lastValidCmd      = 0;
 
+uint8_t           lastDutyLeft      = 0;      // Cached for debug logging
+uint8_t           lastDutyRight     = 0;
+
 // ---------------------------------------------------------------
 void setThrottle(int left, int right) {
-  left  = constrain(left,  0, 255);
-  right = constrain(right, 0, 255);
+  left  = constrain(left,  0, PWM_MAX_DUTY);
+  right = constrain(right, 0, PWM_MAX_DUTY);
 
-  uint8_t dutyLeft  = left  == 0 ? THROTTLE_REST
-                                 : (uint8_t)map(left,  1, 255, THROTTLE_MIN, THROTTLE_MAX);
-  uint8_t dutyRight = right == 0 ? THROTTLE_REST
-                                 : (uint8_t)map(right, 1, 255, THROTTLE_MIN, THROTTLE_MAX);
+  lastDutyLeft  = left  == 0 ? THROTTLE_REST
+                              : (uint8_t)map(left,  1, PWM_MAX_DUTY, THROTTLE_MIN, THROTTLE_MAX);
+  lastDutyRight = right == 0 ? THROTTLE_REST
+                              : (uint8_t)map(right, 1, PWM_MAX_DUTY, THROTTLE_MIN, THROTTLE_MAX);
 
-  ledcWrite(CH_LEFT,  dutyLeft);
-  ledcWrite(CH_RIGHT, dutyRight);
+  ledcWrite(CH_LEFT,  lastDutyLeft);
+  ledcWrite(CH_RIGHT, lastDutyRight);
 }
 
 // ---------------------------------------------------------------
@@ -59,9 +75,9 @@ void applyMix(int throttle255, int steer255) {
   int rightSpeed = throttle255 - steer255;
 
   int maxVal = max(abs(leftSpeed), abs(rightSpeed));
-  if (maxVal > 255) {
-    leftSpeed  = leftSpeed  * 255 / maxVal;
-    rightSpeed = rightSpeed * 255 / maxVal;
+  if (maxVal > PWM_MAX_DUTY) {
+    leftSpeed  = leftSpeed  * PWM_MAX_DUTY / maxVal;
+    rightSpeed = rightSpeed * PWM_MAX_DUTY / maxVal;
   }
 
   setThrottle(leftSpeed, rightSpeed);
@@ -94,8 +110,8 @@ void handleUARTInput() {
       continue;
     }
 
-    int throttle255 = (int)(throttle * 255.0f);
-    int steer255    = (int)(steer    * 255.0f);
+    int throttle255 = (int)(throttle * PWM_MAX_DUTY);
+    int steer255    = (int)(steer    * PWM_MAX_DUTY);
 
     applyMix(throttle255, steer255);
     lastValidCmd = millis();
@@ -181,28 +197,24 @@ void loop() {
       int rawThrottle = myController->axisY();
       int rawTurn     = myController->axisRX();
 
-      if (abs(rawThrottle) < 20) rawThrottle = 0;
-      if (abs(rawTurn)     < 20) rawTurn     = 0;
+      if (abs(rawThrottle) < STICK_DEADZONE) rawThrottle = 0;
+      if (abs(rawTurn)     < STICK_DEADZONE) rawTurn     = 0;
 
       rawThrottle = -rawThrottle;
       if (rawThrottle < 0) rawThrottle = 0;
 
-      int throttle = map(rawThrottle, 0, 511, 0,    255);
-      int turn     = map(rawTurn,  -511, 511, -255, 255);
+      int throttle = map(rawThrottle, 0, STICK_MAX, 0,             PWM_MAX_DUTY);
+      int turn     = map(rawTurn, -STICK_MAX, STICK_MAX, -PWM_MAX_DUTY, PWM_MAX_DUTY);
 
       applyMix(throttle, turn);
 
-      int clL = constrain(throttle + turn, 0, 255);
-      int clR = constrain(throttle - turn, 0, 255);
-      Serial.printf("[LOG] T=%d S=%d  L=%d R=%d  PWM_L=%d PWM_R=%d\n",
-        throttle, turn, clL, clR,
-        clL == 0 ? THROTTLE_REST : (int)map(clL, 1, 255, THROTTLE_MIN, THROTTLE_MAX),
-        clR == 0 ? THROTTLE_REST : (int)map(clR, 1, 255, THROTTLE_MIN, THROTTLE_MAX));
+      Serial.printf("[LOG] T=%d S=%d  PWM_L=%d PWM_R=%d\n",
+        throttle, turn, lastDutyLeft, lastDutyRight);
 
     } else {
       setThrottle(0, 0);
       static unsigned long lastWarn = 0;
-      if (millis() - lastWarn > 3000) {
+      if (millis() - lastWarn > WARN_INTERVAL_MS) {
         Serial.println("[LOG] Waiting for controller...");
         lastWarn = millis();
       }
@@ -218,7 +230,7 @@ void loop() {
     if (millis() - lastValidCmd > UART_TIMEOUT_MS) {
       setThrottle(0, 0);
       static unsigned long lastWdWarn = 0;
-      if (millis() - lastWdWarn > 3000) {
+      if (millis() - lastWdWarn > WARN_INTERVAL_MS) {
         Serial.println("[LOG] UART watchdog — no command, motors at rest.");
         lastWdWarn = millis();
       }

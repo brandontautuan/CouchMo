@@ -13,6 +13,9 @@ Protocol (matches autonomous_car_research.md §5.2):
 import time
 import serial
 
+BOOT_WAIT_S   = 2      # Seconds to let ESP32 boot logs flush after port open
+ACK_TIMEOUT_S = 0.5    # Max seconds to wait for ACK/ERR per command
+
 
 class SerialController:
     """
@@ -38,7 +41,7 @@ class SerialController:
         self._ser = serial.Serial(self.port, self.baud, timeout=self.timeout)
         self._ser.reset_input_buffer()
         self._ser.reset_output_buffer()
-        time.sleep(2)  # ESP32 prints boot logs; let them flush
+        time.sleep(BOOT_WAIT_S)
 
     def disconnect(self) -> None:
         """Send a stop command, then close the port."""
@@ -88,7 +91,7 @@ class SerialController:
         Read lines until ACK, ERR, or timeout.
         Skips any [LOG] debug lines from the ESP32.
         """
-        deadline = time.monotonic() + 0.5  # 500 ms max wait
+        deadline = time.monotonic() + ACK_TIMEOUT_S
 
         while time.monotonic() < deadline:
             raw = self._ser.readline()
