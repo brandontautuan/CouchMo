@@ -14,7 +14,7 @@ sleep 1
 echo ""
 echo "╔══════════════════════════════════════════════════╗"
 echo "║  Couchmo — Phase 3 Sim + Nav2 + SLAM            ║"
-echo "║  Open: http://localhost:6080/vnc.html            ║"
+echo "║  Open: http://localhost:6081/vnc.html            ║"
 echo "║  Teleop (new terminal):                          ║"
 echo "║    docker exec -it couchmo_sim bash              ║"
 echo "║    source /opt/ros/humble/setup.bash             ║"
