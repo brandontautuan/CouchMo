@@ -7,3 +7,7 @@ build/
 install/
 log/
 simulation/src/couchmo_nav/maps/*.pgm
+
+# Git worktrees (local)
+.worktrees/
+worktrees/
