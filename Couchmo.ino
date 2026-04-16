@@ -5,7 +5,7 @@
 #define DAC_LEFT      DAC_CHANNEL_1   // GPIO25
 #define DAC_RIGHT     DAC_CHANNEL_2   // GPIO26
 
-#define EBRAKE        5 // GPIOD5 // This pin will be held high and allowed to go low when brake pressed.
+#define EBRAKE        5 // GPIO5 — held HIGH, pulled LOW when brake pressed
 
 // ---------------------------------------------------------------
 // Throttle voltage calibration
@@ -16,6 +16,23 @@
 // ---------------------------------------------------------------
 #define THROTTLE_ZERO  85    // ~1.1 V — idle / zero speed
 #define THROTTLE_FULL  255   // ~3.3 V — full speed
+
+// ---------------------------------------------------------------
+// Dual-mode input: PS4 controller vs laptop UART
+// ---------------------------------------------------------------
+enum DriveMode { MODE_CONTROLLER, MODE_UART };
+DriveMode currentMode = MODE_CONTROLLER;
+
+#define TRIANGLE_HOLD_MS  5000   // Hold Triangle this long to toggle mode
+unsigned long trianglePressStart = 0;
+bool          triangleWasHeld    = false;
+
+#define UART_WATCHDOG_MS  500    // Stop motors if no UART command within this window
+#define UART_DETECT_MS    2000   // Laptop considered "present" if command arrived within this window
+unsigned long lastUartCommandMs  = 0;
+int           uartThrottle       = 0;   // 0–255 from last UART command
+int           uartSteer          = 0;   // -255–255 from last UART command
+String        uartBuffer;
 
 ControllerPtr myController = nullptr;
 
@@ -36,6 +53,24 @@ void setThrottle(int left, int right) {
   dac_output_voltage(DAC_RIGHT, dacRight);
 }
 
+// ---------------------------------------------------------------
+// applyMix: arcade-style differential skid-steer.
+//   throttle 0–255, steer -255–255 (negative = left, positive = right)
+//   Shared by both controller mode and UART mode.
+// ---------------------------------------------------------------
+void applyMix(int throttle, int steer) {
+  int leftSpeed  = throttle + steer;
+  int rightSpeed = throttle - steer;
+
+  int maxVal = max(abs(leftSpeed), abs(rightSpeed));
+  if (maxVal > 255) {
+    leftSpeed  = leftSpeed  * 255 / maxVal;
+    rightSpeed = rightSpeed * 255 / maxVal;
+  }
+
+  setThrottle(leftSpeed, rightSpeed);
+}
+
 void onConnectedController(ControllerPtr ctl) {
   myController = ctl;
   Serial.println("[LOG] PS4 controller connected!");
@@ -43,8 +78,47 @@ void onConnectedController(ControllerPtr ctl) {
 
 void onDisconnectedController(ControllerPtr ctl) {
   myController = nullptr;
-  setThrottle(0, 0);
+  if (currentMode == MODE_CONTROLLER) {
+    setThrottle(0, 0);
+  }
   Serial.println("[LOG] PS4 controller disconnected — motors stopped.");
+}
+
+// ---------------------------------------------------------------
+// handleUARTInput: non-blocking UART parser.
+//   Protocol: laptop sends "steer,throttle\n"
+//     steer ∈ [-1.0, 1.0], throttle ∈ [0.0, 1.0]
+//   ESP32 replies "ACK\n" or "ERR\n".
+//   Always parses regardless of mode so the laptop can prove
+//   it is connected while the ESP32 is still in controller mode.
+// ---------------------------------------------------------------
+void handleUARTInput() {
+  while (Serial.available()) {
+    char c = (char)Serial.read();
+    if (c == '\n') {
+      uartBuffer.trim();
+      if (uartBuffer.length() == 0) { uartBuffer = ""; continue; }
+
+      int commaIdx = uartBuffer.indexOf(',');
+      if (commaIdx < 0) { Serial.println("ERR"); uartBuffer = ""; continue; }
+
+      float steer    = uartBuffer.substring(0, commaIdx).toFloat();
+      float throttle = uartBuffer.substring(commaIdx + 1).toFloat();
+      uartBuffer = "";
+
+      if (steer < -1.0f || steer > 1.0f || throttle < 0.0f || throttle > 1.0f) {
+        Serial.println("ERR");
+        continue;
+      }
+
+      uartSteer    = (int)(steer    * 255.0f);
+      uartThrottle = (int)(throttle * 255.0f);
+      lastUartCommandMs = millis();
+      Serial.println("ACK");
+    } else {
+      uartBuffer += c;
+    }
+  }
 }
 
 void setup() {
@@ -64,69 +138,82 @@ void setup() {
 
 void loop() {
   BP32.update();
+  handleUARTInput();
 
+  // ── Controller buttons (always active if connected) ─────────
   if (myController && myController->isConnected()) {
+    bool brake    = myController->b();   // Circle
+    bool triangle = myController->y();   // Triangle
 
-    // Bluepad32 axes: -511 … +511
-    int rawThrottle = myController->axisY();    // Left stick Y
-    int rawTurn     = myController->axisRX();   // Right stick X
-    bool brake      = myController->b();        // Circle button
+    // Triangle hold → toggle mode
+    if (triangle) {
+      if (trianglePressStart == 0) trianglePressStart = millis();
 
+      if (!triangleWasHeld && (millis() - trianglePressStart >= TRIANGLE_HOLD_MS)) {
+        triangleWasHeld = true;
+
+        if (currentMode == MODE_CONTROLLER) {
+          if (millis() - lastUartCommandMs < UART_DETECT_MS) {
+            currentMode = MODE_UART;
+            setThrottle(0, 0);
+            Serial.println("[LOG] Mode: UART");
+          } else {
+            Serial.println("[LOG] Mode switch ignored — no UART connection");
+          }
+        } else {
+          currentMode = MODE_CONTROLLER;
+          setThrottle(0, 0);
+          Serial.println("[LOG] Mode: CONTROLLER");
+        }
+      }
+    } else {
+      trianglePressStart = 0;
+      triangleWasHeld    = false;
+    }
+
+    // Circle → universal brake (both modes)
     if (brake) {
-      digitalWrite(EBRAKE, LOW);  // Active-low brake signal
+      digitalWrite(EBRAKE, LOW);
       setThrottle(0, 0);
       Serial.println("[LOG] BRAKE");
       return;
     }
     digitalWrite(EBRAKE, HIGH);
-
-    // Deadzone
-    if (abs(rawThrottle) < 20) rawThrottle = 0;
-    if (abs(rawTurn)     < 20) rawTurn     = 0;
-
-    // axisY is negative when pushed forward — flip it
-    rawThrottle = -rawThrottle;
-
-    // Forward only — drop any reverse input
-    if (rawThrottle < 0) rawThrottle = 0;
-
-    // Rescale to 0-255 / -255 to 255
-    int throttle = map(rawThrottle,    0, 511, 0,    255);
-    int turn     = map(rawTurn,     -511, 511, -255, 255);
-
-    // Differential mixing
-    int leftSpeed  = throttle + turn;
-    int rightSpeed = throttle - turn;
-
-    // Preserve the left/right ratio if either side clips
-    int maxVal = max(abs(leftSpeed), abs(rightSpeed));
-    if (maxVal > 255) {
-      leftSpeed  = leftSpeed  * 255 / maxVal;
-      rightSpeed = rightSpeed * 255 / maxVal;
-    }
-
-    setThrottle(leftSpeed, rightSpeed);
-
-    Serial.printf("[LOG] Throttle=%d Turn=%d  L=%d R=%d  DAC_L=%d DAC_R=%d\n",
-      throttle, turn, leftSpeed, rightSpeed,
-      map(constrain(leftSpeed,  0,255), 0,255, THROTTLE_ZERO, THROTTLE_FULL),
-      map(constrain(rightSpeed, 0,255), 0,255, THROTTLE_ZERO, THROTTLE_FULL));
-
-  } else {
-    digitalWrite(EBRAKE, HIGH);
-    setThrottle(0, 0);
-    static unsigned long lastWarn = 0;
-    if (millis() - lastWarn > 3000) {
-      Serial.println("[LOG] Waiting for controller...");
-      lastWarn = millis();
-    }
   }
 
-  // Optional: commands from Serial monitor
-  if (Serial.available()) {
-    String cmd = Serial.readStringUntil('\n');
-    cmd.trim();
-    Serial.print("[LOG] Serial in: ");
-    Serial.println(cmd);
+  // ── Drive output based on mode ─────────────────────────────
+  if (currentMode == MODE_CONTROLLER) {
+
+    if (myController && myController->isConnected()) {
+      int rawThrottle = myController->axisY();
+      int rawTurn     = myController->axisRX();
+
+      if (abs(rawThrottle) < 20) rawThrottle = 0;
+      if (abs(rawTurn)     < 20) rawTurn     = 0;
+
+      rawThrottle = -rawThrottle;                    // axisY negative = forward
+      if (rawThrottle < 0) rawThrottle = 0;          // forward only
+
+      int throttle = map(rawThrottle, 0, 511, 0,    255);
+      int turn     = map(rawTurn,  -511, 511, -255, 255);
+
+      applyMix(throttle, turn);
+    } else {
+      digitalWrite(EBRAKE, HIGH);
+      setThrottle(0, 0);
+      static unsigned long lastWarn = 0;
+      if (millis() - lastWarn > 3000) {
+        Serial.println("[LOG] Waiting for controller...");
+        lastWarn = millis();
+      }
+    }
+
+  } else {  // MODE_UART
+
+    if (lastUartCommandMs > 0 && (millis() - lastUartCommandMs < UART_WATCHDOG_MS)) {
+      applyMix(uartThrottle, uartSteer);
+    } else {
+      setThrottle(0, 0);
+    }
   }
 }
