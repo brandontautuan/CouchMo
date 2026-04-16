@@ -2,27 +2,29 @@
 
 #define SERIAL_BAUD       115200
 
-// --- Pins and PWM Configuration ---
-#define PIN_LEFT          2
-#define PIN_RIGHT         13
+// --- DAC pin assignments (GPIO 25 & 26 are the two DAC channels on ESP32) ---
+#define PIN_LEFT          25   // DAC1
+#define PIN_RIGHT         26   // DAC2
 
-const int PWM_FREQ = 20000;  // 10kHz to "trick" the controller into thinking it is recieving analog input
-const int PWM_RES  = 8;      // 8-bit (0–255) (reasonable for 10kHz)
-const int CH_LEFT  = 0;
-const int CH_RIGHT = 1;
+// --- brakes may need separate pins since one is Brake High and one is Brake Low
+#define BRAKE_PIN_LEFT    14 // Brake Low
+#define BRAKE_PIN_RIGHT   14 // Brake High OR Brake Low on controller
 
 // ---------------------------------------------------------------
-// Throttle voltage calibration
-//   PWM (8-bit) → low-pass → level-shifter (0–4.856 V ref from controller)
-//   V_out = (duty / 255) × 4.856 V   →   duty = V_target × 255 / 4.856
+// Throttle voltage calibration  (DAC direct, no level-shifter)
+//   V_out = (dacValue / 255) × 3.3 V
 //
-//   THROTTLE_REST  — 0 V, well below the 1.1 V "go" threshold
-//   THROTTLE_MIN   — ~1.1 V (minimum recognised speed)   → duty 58
-//   THROTTLE_MAX   — ~4.2 V (full speed)                 → duty 220
+//   Controller expects 1.1–4.2 V on its throttle input.
+//   DAC caps at 3.3 V, so max reachable throttle ≈ 71 % of full.
+//   Add an op-amp / level-shifter stage to reach the full 4.2 V.
+//
+//   THROTTLE_REST  — 0 V  (DAC 0),   well below 1.1 V "go" threshold
+//   THROTTLE_MIN   — 1.1 V            → 1.1 / 3.3 × 255 ≈ 85
+//   THROTTLE_MAX   — 3.3 V (DAC max)  → 255
 // ---------------------------------------------------------------
 #define THROTTLE_REST     0
-#define THROTTLE_MIN      110
-#define THROTTLE_MAX      220
+#define THROTTLE_MIN      85
+#define THROTTLE_MAX      255
 
 // --- Mode switching & UART watchdog ---
 #define MODE_SWITCH_MS    5000    // Hold triangle for 5 s to toggle
@@ -46,8 +48,8 @@ void setThrottle(int left, int right) {
   uint8_t dutyRight = right == 0 ? THROTTLE_REST
                                  : (uint8_t)map(right, 1, 255, THROTTLE_MIN, THROTTLE_MAX);
 
-  ledcWrite(CH_LEFT,  dutyLeft);
-  ledcWrite(CH_RIGHT, dutyRight);
+  dacWrite(PIN_LEFT,  dutyLeft);
+  dacWrite(PIN_RIGHT, dutyRight);
 }
 
 // ---------------------------------------------------------------
@@ -123,11 +125,8 @@ void setup() {
   Serial.begin(SERIAL_BAUD);
   Serial.println("[LOG] ESP32 booting...");
 
-  ledcSetup(CH_LEFT,  PWM_FREQ, PWM_RES);
-  ledcAttachPin(PIN_LEFT,  CH_LEFT);
-
-  ledcSetup(CH_RIGHT, PWM_FREQ, PWM_RES);
-  ledcAttachPin(PIN_RIGHT, CH_RIGHT);
+  dacWrite(PIN_LEFT,  0);
+  dacWrite(PIN_RIGHT, 0);
 
   setThrottle(0, 0);
 
@@ -194,10 +193,10 @@ void loop() {
 
       int clL = constrain(throttle + turn, 0, 255);
       int clR = constrain(throttle - turn, 0, 255);
-      Serial.printf("[LOG] T=%d S=%d  L=%d R=%d  PWM_L=%d PWM_R=%d\n",
-        throttle, turn, clL, clR,
-        clL == 0 ? THROTTLE_REST : (int)map(clL, 1, 255, THROTTLE_MIN, THROTTLE_MAX),
-        clR == 0 ? THROTTLE_REST : (int)map(clR, 1, 255, THROTTLE_MIN, THROTTLE_MAX));
+      int dacL = clL == 0 ? THROTTLE_REST : (int)map(clL, 1, 255, THROTTLE_MIN, THROTTLE_MAX);
+      int dacR = clR == 0 ? THROTTLE_REST : (int)map(clR, 1, 255, THROTTLE_MIN, THROTTLE_MAX);
+      Serial.printf("[LOG] T=%d S=%d  L=%d R=%d  DAC_L=%d DAC_R=%d\n",
+        throttle, turn, clL, clR, dacL, dacR);
 
     } else {
       setThrottle(0, 0);
