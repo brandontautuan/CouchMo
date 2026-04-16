@@ -1,6 +1,0 @@
-cmake_minimum_required(VERSION 3.8)
-project(couchmo_nav)
-find_package(ament_cmake REQUIRED)
-install(DIRECTORY config DESTINATION share/${PROJECT_NAME})
-install(DIRECTORY maps  DESTINATION share/${PROJECT_NAME})
-ament_package()

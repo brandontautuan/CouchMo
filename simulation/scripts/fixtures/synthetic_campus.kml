@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Placeholder fixture — replace coordinates with real campus KML before generating the production world. Used by tests and the synthetic world only. -->
+<kml xmlns="http://www.opengis.net/kml/2.2">
+  <Document>
+    <name>Synthetic Campus Fixture</name>
+    <description>L-shaped placeholder path near (lat=37.0000, lon=-120.0000). Each 0.0001° step is roughly 11 m on the ground at this latitude.</description>
+    <Placemark>
+      <name>synthetic_campus_path</name>
+      <LineString>
+        <tessellate>1</tessellate>
+        <altitudeMode>clampToGround</altitudeMode>
+        <coordinates>
+          -120.0000,37.0000,0
+          -120.0000,37.0001,0
+          -120.0000,37.0002,0
+          -120.0001,37.0002,0
+          -120.0002,37.0002,0
+        </coordinates>
+      </LineString>
+    </Placemark>
+  </Document>
+</kml>

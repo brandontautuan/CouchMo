@@ -2,11 +2,32 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Fix and extend the CouchMo simulator so it can generate training data and train a camera-only policy for full-campus sidewalk driving, using a waypoint-follower expert plus optional RL fine-tuning.
+**Goal:** Fix and extend the CouchMo simulator so it can generate training data, train a camera-only policy for full-campus sidewalk driving, and ship that policy to a **Windows laptop** that drives the real couch — all without forcing any single host OS into the loop.
 
-**Architecture:** Keep the existing ROS 2 Humble + Gazebo Classic sim as the runtime. Add a Google Earth KML→waypoints→world generator, add two simulated armrest cameras, implement a pure-pursuit expert that outputs `(steer, throttle)` at 10 Hz, and build dataset + training scripts that ingest sim images and expert actions.
+**Architecture — three surfaces:**
 
-**Tech Stack:** ROS 2 Humble, Gazebo Classic 11 (`gazebo_ros_pkgs`), Python 3, NumPy/OpenCV/PyTorch (existing `model.py`), Docker/noVNC (existing `simulation/`), optional Gymnasium-style wrappers for training.
+| Surface | Where it runs | Stack | Talks to |
+|---|---|---|---|
+| `simulation/` | Docker on any desktop (Win/Mac/Linux) | ROS 2 Humble + Gazebo Classic 11 | Writes dataset shards to a host-mounted folder |
+| `training/` | Native on the desktop (Windows w/ or w/o GPU) | Python 3, NumPy/OpenCV/PyTorch | Reads dataset, writes `.pt` + `.onnx` |
+| `runtime/` | Native on the laptop (Windows, **no NVIDIA GPU**) and debuggable on the desktop | Python 3, ONNX Runtime CPU, OpenCV, pyserial | Loads `.onnx`, drives serial protocol from `serial_controller.py` |
+
+**Hard contracts between surfaces:**
+
+- **Dataset format** — directory of `.npz` shards + `manifest.json` (left, right, steer, throttle, t). Sim writes it; training reads it. No ROS imports in `training/`.
+- **Model format** — single `model.onnx` (and `model.pt` kept for re-training). Training writes it; runtime loads it. No torch import on the laptop.
+- **Action protocol** — `(steer ∈ [-1,1], throttle ∈ [0,1])` at 10 Hz, identical in sim adapter and on-couch serial layer.
+- **Preprocessing** — defined exactly once in `shared/preprocess.py`, imported by both `training/` and `runtime/`.
+
+**Cross-platform principles (apply to every task):**
+
+- All Python uses `pathlib.Path`. No raw `/` separators.
+- All host-runnable shell scripts ship in pairs: `*.sh` (bash, LF) for macOS/Linux, `*.ps1` (PowerShell) for Windows. Line endings pinned via `.gitattributes`.
+- Docker accessed via `docker compose` (v2). noVNC at `http://localhost:6081/vnc.html` is the only host-side viewer — no X11/XQuartz on either OS.
+- Machine-specific values (serial port `COM3` vs `/dev/ttyUSB0`, camera index, dataset root) are CLI args, never hardcoded.
+- `runtime/` MUST install with one `pip install -r runtime/requirements.txt` on bare Windows or Mac Python 3.10+. No ROS, no Docker, no torch.
+
+**Branching:** Per user direction, work happens on a feature branch in the existing `CouchMo/` repo (no worktree). Suggested name: `feat/campus-sim`.
 
 ---
 
@@ -14,65 +35,210 @@
 
 **Modify (existing):**
 - `simulation/src/couchmo_description/urdf/couchmo.urdf.xacro` — add two camera sensors at armrest mounts.
-- `simulation/src/couchmo_description/launch/gazebo.launch.py` — ensure camera topics are bridged/published and sim can spawn in new campus world.
-- `simulation/src/couchmo_description/worlds/` — add new generated campus world (`*.world`) + keep existing worlds.
-- `simulation/entrypoint.sim.sh` — optionally add flags/launch args for training/headless runs and improve startup reliability.
+- `simulation/src/couchmo_description/launch/gazebo.launch.py` — accept new world arg, ensure camera topics are bridged.
+- `simulation/src/couchmo_description/worlds/` — add new generated campus world (`*.world`) + keep existing.
+- `simulation/docker-compose.yml` — add bind mount `./training/data:/workspace/data`, optional headless service.
+- `simulation/run.sh` — drop XQuartz; use noVNC only; minimal wrapper around `docker compose`.
 
-**Create (new):**
-- `simulation/scripts/kml_to_waypoints.py` — parse KML/KMZ and produce local ENU waypoints (CSV/YAML).
-- `simulation/scripts/generate_campus_world.py` — generate a hybrid SDF `.world` from waypoints + simple obstacle templates.
-- `simulation/src/couchmo_nav/config/waypoint_follower.yaml` — parameters: corridor width (3.0m), lookahead, throttle caps, etc.
-- `simulation/src/couchmo_nav/launch/waypoint_expert.launch.py` — launches the waypoint expert node (and optional visualization markers).
-- `simulation/src/couchmo_nav/src/waypoint_expert_node.py` — ROS 2 node implementing pure pursuit expert producing `(steer, throttle)` at 10 Hz.
-- `simulation/src/couchmo_nav/src/steer_throttle_to_cmd_vel.py` — adapter mapping `(steer, throttle)` → `cmd_vel` (for Gazebo diff-drive plugin).
-- `training/dataset/record_expert_rollouts.py` — record camera frames + expert actions to disk.
-- `training/dataset/format_dataset.py` — convert rollouts to a training-friendly dataset format.
-- `training/imitation/train_bc.py` — behavior cloning training loop.
-- `training/imitation/eval_in_sim.py` — run trained policy in sim via ROS bridge.
-- `training/rl/train_ppo.py` (optional milestone) — PPO fine-tune wrapper.
-- `training/README.md` — exact commands for generating data and training.
+**Create (new — repo-wide):**
+- `.gitattributes` — pin `*.sh eol=lf`, `*.ps1 eol=crlf`, default `text=auto`.
+- `.gitignore` additions — `training/data/`, `training/checkpoints/`, `runtime/__pycache__/`, `*.onnx`, `*.pt`.
 
-**Create (tests):**
+**Create (new — `simulation/`):**
+- `simulation/run.ps1` — Windows PowerShell equivalent of `run.sh`.
+- `simulation/scripts/bringup_check.py` — cross-platform health check (Docker reachable, port 6081 free).
+- `simulation/scripts/kml_to_waypoints.py` — parse KML/KMZ → local ENU waypoints.
+- `simulation/scripts/generate_campus_world.py` — generate hybrid SDF world from waypoints.
+- `simulation/scripts/fixtures/synthetic_campus.kml` — 3-segment fake KML so Tasks 3 & 4 can run before real campus KML exists.
+- `simulation/src/couchmo_nav/package.xml` — ROS 2 Python package manifest.
+- `simulation/src/couchmo_nav/setup.py` — ament_python setup.
+- `simulation/src/couchmo_nav/setup.cfg` — entry-point bindings.
+- `simulation/src/couchmo_nav/resource/couchmo_nav` — ament resource marker.
+- `simulation/src/couchmo_nav/couchmo_nav/__init__.py`
+- `simulation/src/couchmo_nav/couchmo_nav/waypoint_expert_node.py` — pure-pursuit expert @10 Hz.
+- `simulation/src/couchmo_nav/couchmo_nav/steer_throttle_to_cmd_vel.py` — adapter node.
+- `simulation/src/couchmo_nav/couchmo_nav/dataset_recorder_node.py` — writes `.npz` shards.
+- `simulation/src/couchmo_nav/launch/waypoint_expert.launch.py`
+- `simulation/src/couchmo_nav/launch/record_dataset.launch.py`
+- `simulation/src/couchmo_nav/config/waypoint_follower.yaml`
+
+**Create (new — `shared/`, used by both training and runtime):**
+- `shared/__init__.py`
+- `shared/preprocess.py` — single source of truth for 84×84 grayscale + 4-frame stack → `(8, 84, 84) float32`.
+- `shared/dataset_format.py` — read/write helpers for `.npz` shard format and `manifest.json`.
+
+**Create (new — `training/`):**
+- `training/pyproject.toml` — pytest config, ruff config, package layout.
+- `training/requirements.txt` — torch (CPU/CUDA), numpy, opencv-python, onnx, tqdm.
+- `training/requirements-dev.txt` — pytest, ruff.
+- `training/conftest.py` — adds `shared/` to `sys.path` for tests.
+- `training/README.md` — exact commands per OS.
+- `training/dataset/format_dataset.py` — convert raw recorder output to training-ready shards (if needed).
+- `training/imitation/model.py` — minimal CNN policy: `(8,84,84) → (steer, throttle)`.
+- `training/imitation/train_bc.py` — behavior cloning loop. **No ROS imports.**
+- `training/imitation/export_onnx.py` — `torch.onnx.export(...)` + numerical-equivalence check vs `.pt`.
+- `training/imitation/eval_in_sim.py` — ROS bridge for in-sim eval. `try: import rclpy except ImportError: ...` — runs only inside the sim container or a Linux ROS host.
+- `training/rl/train_ppo.py` — optional, Task 9.
 - `training/tests/test_kml_to_waypoints.py`
 - `training/tests/test_pure_pursuit.py`
 - `training/tests/test_action_adapter.py`
+- `training/tests/test_world_generation.py`
+- `training/tests/test_preprocess.py`
+- `training/tests/test_onnx_export.py`
+- `training/tests/test_dataset_format.py`
+
+**Create (new — `runtime/`, the on-laptop loop):**
+- `runtime/requirements.txt` — `onnxruntime`, `opencv-python`, `pyserial`, `numpy`. **Nothing else.**
+- `runtime/README.md` — install on Windows / Mac, COM port discovery, camera index discovery.
+- `runtime/__init__.py`
+- `runtime/drive.py` — main entry. Modes: `--source live` and `--source replay`.
+- `runtime/camera.py` — OpenCV `VideoCapture` wrapper, dual-cam sync.
+- `runtime/control.py` — wraps `serial_controller.py`; cross-platform port (`COM3` or `/dev/...`).
+- `runtime/inference.py` — ONNX Runtime session wrapper, uses `shared.preprocess`.
+- `runtime/tests/test_inference_smoke.py` — load `.onnx`, run on random input, assert output range.
+- `runtime/tests/test_replay.py` — `--source replay` against a tiny fixture episode.
 
 ---
 
-## Task 1: Reproduce + stabilize sim bringup (baseline)
+## Task 0: Cross-platform scaffolding (prereqs)
+
+**Why this exists:** Tasks 2–9 in earlier drafts assumed the `couchmo_nav` ROS package, the `training/` Python project, and the `shared/` preprocessing module already existed. They don't. This task creates them so later tasks can focus on logic, not boilerplate.
 
 **Files:**
-- Modify: `simulation/run.sh`
-- Modify: `simulation/docker-compose.yml`
-- Modify: `simulation/entrypoint.sim.sh`
-- Doc: `simulation/README.md` (create if missing)
+- Create: `.gitattributes`, `.gitignore` updates
+- Create: `simulation/src/couchmo_nav/{package.xml, setup.py, setup.cfg, resource/couchmo_nav, couchmo_nav/__init__.py, launch/, config/}`
+- Create: `shared/{__init__.py, preprocess.py, dataset_format.py}`
+- Create: `training/{pyproject.toml, requirements.txt, requirements-dev.txt, conftest.py, README.md, tests/__init__.py}`
+- Create: `runtime/{requirements.txt, README.md, __init__.py, tests/__init__.py}`
+- Create: `simulation/scripts/fixtures/synthetic_campus.kml`
 
-- [ ] **Step 1: Add a baseline “bringup check” doc**
-  - Document expected behavior for:
-    - `./run.sh preview` → RViz shows couch model
-    - `./run.sh sim` → noVNC desktop shows Gazebo + RViz
-  - Include failure modes (Docker daemon not running, ports blocked).
+- [ ] **Step 1: Branch**
+  ```bash
+  git checkout -b feat/campus-sim
+  ```
 
-- [ ] **Step 2: Add a “health check” script (readonly checks)**
-  - Add a script that prints:
-    - whether Docker daemon reachable
-    - whether port 6081 is bound after start
-  - Run it before launching to provide actionable error messages.
+- [ ] **Step 2: `.gitattributes` + `.gitignore`**
+  - `.gitattributes`:
+    ```
+    * text=auto
+    *.sh text eol=lf
+    *.ps1 text eol=crlf
+    *.bat text eol=crlf
+    *.png binary
+    *.npz binary
+    *.onnx binary
+    *.pt binary
+    ```
+  - Add to `.gitignore`: `training/data/`, `training/checkpoints/`, `**/__pycache__/`, `*.onnx`, `*.pt`, `.pytest_cache/`, `.venv/`.
 
-- [ ] **Step 3: Verify baseline works**
-  - Run:
-    - `cd simulation && ./run.sh preview`
-    - `cd simulation && ./run.sh sim`
-  - Expected:
-    - preview shows RViz couch
-    - sim shows Gazebo + RViz, couch spawns
+- [ ] **Step 3: `couchmo_nav` ROS 2 package skeleton**
+  - `package.xml` with `<buildtool_depend>ament_python</buildtool_depend>`, deps on `rclpy`, `sensor_msgs`, `geometry_msgs`, `std_msgs`, `cv_bridge`.
+  - `setup.py` declares the package, glob-installs `launch/*.py` and `config/*.yaml`, registers entry points (filled in later tasks).
+  - Create empty `couchmo_nav/__init__.py`, `launch/`, `config/` dirs.
+  - Verify build inside the sim container: `cd /ros2_ws && colcon build --packages-select couchmo_nav`.
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 4: `shared/preprocess.py`**
+  - Function: `preprocess_pair(left_bgr: np.ndarray, right_bgr: np.ndarray) -> np.ndarray` returning `(2, 84, 84) uint8`.
+  - Class: `FrameStacker(num_frames=4)` with `.push(pair)` → `(8, 84, 84) float32` in `[0, 1]`.
+  - Pure NumPy + OpenCV. Importable from training and runtime with no extra deps.
 
-```bash
-git add simulation/run.sh simulation/docker-compose.yml simulation/entrypoint.sim.sh simulation/README.md
-git commit -m "sim: stabilize bringup and document health checks"
-```
+- [ ] **Step 5: `shared/dataset_format.py`**
+  - `write_shard(path, left, right, steer, throttle, t)` — saves `.npz`.
+  - `read_shard(path) -> dict` — round-trip.
+  - `Manifest` dataclass with `episodes: list[EpisodeMeta]`, JSON serializable.
+
+- [ ] **Step 6: `training/` Python project**
+  - `pyproject.toml` with `[tool.pytest.ini_options] testpaths = ["tests"]`, ruff config.
+  - `requirements.txt`:
+    ```
+    torch>=2.2
+    numpy>=1.24
+    opencv-python>=4.8
+    onnx>=1.15
+    tqdm>=4.66
+    ```
+    (Document in README that the desktop chooses `torch` CPU or CUDA build.)
+  - `requirements-dev.txt`: `pytest>=8`, `ruff>=0.4`.
+  - `conftest.py` adds repo root to `sys.path` so `import shared.preprocess` works in tests.
+  - `README.md`: per-OS install commands (Win PowerShell venv, Mac/Linux bash venv).
+
+- [ ] **Step 7: `runtime/` Python project**
+  - `requirements.txt`:
+    ```
+    onnxruntime>=1.17
+    opencv-python>=4.8
+    pyserial>=3.5
+    numpy>=1.24
+    ```
+  - `README.md`: install on Windows laptop (PowerShell venv), COM port discovery (`Get-WmiObject Win32_SerialPort`), camera index discovery snippet.
+
+- [ ] **Step 8: `shared/preprocess.py` tests**
+  - `training/tests/test_preprocess.py`: assert output shape, dtype, value range, determinism.
+
+- [ ] **Step 9: Synthetic KML fixture**
+  - `simulation/scripts/fixtures/synthetic_campus.kml` — one `<LineString>` with ~5 lat/lon coords forming an L-shape near the campus origin. Used by Tasks 3 & 4 until real campus KML is provided.
+
+- [ ] **Step 10: Verify**
+  ```bash
+  cd training && python -m pytest -q
+  ```
+  Expect: `test_preprocess.py` passes; the other test files exist as empty placeholders or are skipped via `pytest.skip("filled in Task N")`.
+
+- [ ] **Step 11: Commit**
+  ```bash
+  git add .gitattributes .gitignore shared training runtime simulation/src/couchmo_nav simulation/scripts/fixtures
+  git commit -m "scaffold: three-surface project layout (sim/training/runtime) + couchmo_nav package"
+  ```
+
+---
+
+## Task 1: Cross-platform sim bringup
+
+**Files:**
+- Modify: `simulation/run.sh` (strip XQuartz, use noVNC)
+- Create: `simulation/run.ps1`
+- Create: `simulation/scripts/bringup_check.py`
+- Modify: `simulation/docker-compose.yml` (bind mount + optional headless service)
+- Create: `simulation/README.md`
+
+- [ ] **Step 1: `bringup_check.py` (cross-platform Python)**
+  - Stdlib only. Checks:
+    - `docker version` returns 0
+    - port 6081 free or already bound by us
+    - host has at least 8 GB RAM (warn, don't fail)
+  - Prints actionable error messages.
+
+- [ ] **Step 2: Rewrite `run.sh` minimally**
+  - Drop all XQuartz logic.
+  - Modes: `sim | preview | shell | headless`.
+  - Just calls `python3 scripts/bringup_check.py && docker compose up <service>`.
+  - Print noVNC URL `http://localhost:6081/vnc.html` after start.
+
+- [ ] **Step 3: Create `run.ps1`**
+  - Same modes as `run.sh`. Uses `python` (Windows PEP 397 launcher) and `docker compose`.
+  - Print noVNC URL.
+  - Verified by user manually on Windows; subagent only writes the script.
+
+- [ ] **Step 4: Update `docker-compose.yml`**
+  - Add bind mount on `sim` service: `- ../training/data:/workspace/data`.
+  - Optional `sim_headless` service that runs without noVNC for batch dataset gen.
+
+- [ ] **Step 5: `simulation/README.md`**
+  - Per-OS bringup table:
+    - Windows: `.\run.ps1 sim`
+    - macOS/Linux: `./run.sh sim`
+  - Both → open `http://localhost:6081/vnc.html`.
+  - Failure modes: Docker daemon not running, port 6081 in use, WSL2 not enabled (Windows).
+
+- [ ] **Step 6: Verify (host-side, where possible)**
+  - `python simulation/scripts/bringup_check.py` — should pass on host even without Docker running (prints the actionable error).
+  - Live `docker compose up` verification is deferred to user; subagent must NOT block on it.
+
+- [ ] **Step 7: Commit**
+  ```bash
+  git add simulation/run.sh simulation/run.ps1 simulation/scripts/bringup_check.py simulation/docker-compose.yml simulation/README.md
+  git commit -m "sim: cross-platform bringup (.sh + .ps1) using noVNC, drop XQuartz"
+  ```
 
 ---
 
@@ -80,230 +246,287 @@ git commit -m "sim: stabilize bringup and document health checks"
 
 **Files:**
 - Modify: `simulation/src/couchmo_description/urdf/couchmo.urdf.xacro`
-- Modify: `simulation/src/couchmo_description/launch/gazebo.launch.py` (if remapping needed)
+- Modify: `simulation/src/couchmo_description/launch/gazebo.launch.py` (only if remapping needed)
 
 - [ ] **Step 1: Define camera links + joints**
-  - Add `left_camera_link` and `right_camera_link` fixed to chassis/body.
+  - Add `left_camera_link` and `right_camera_link` fixed to chassis.
   - Mount height: 32 inches = 0.8128 m above ground.
-  - Lateral offset: approximate from couch width; start with ±(body_w/2 - 0.10) and adjust.
+  - Lateral offset: ±(body_w/2 - 0.10).
 
 - [ ] **Step 2: Add Gazebo camera sensors**
-  - Add `<gazebo reference="...">` camera sensors publishing ROS image topics:
+  - `<gazebo reference="...">` blocks publishing:
     - `/left_cam/image_raw`
     - `/right_cam/image_raw`
-  - Set realistic-ish parameters: update_rate ~10–30 Hz; FOV approximate if known.
+  - update_rate 10 Hz, FOV approximating Brio 100 (~78° HFOV).
 
-- [ ] **Step 3: Validation**
-  - Run sim and confirm topics exist:
-    - `ros2 topic list | grep image_raw`
-  - Optional: view in RViz.
+- [ ] **Step 3: Validation (deferred to user)**
+  - Subagent confirms xacro parses (`xacro couchmo.urdf.xacro > /tmp/out.urdf` if available).
+  - User runs sim and confirms `ros2 topic list | grep image_raw` shows both topics.
 
 - [ ] **Step 4: Commit**
-
-```bash
-git add simulation/src/couchmo_description/urdf/couchmo.urdf.xacro simulation/src/couchmo_description/launch/gazebo.launch.py
-git commit -m "sim: add dual armrest cameras to CouchMo URDF"
-```
+  ```bash
+  git add simulation/src/couchmo_description/urdf/couchmo.urdf.xacro simulation/src/couchmo_description/launch/gazebo.launch.py
+  git commit -m "sim: add dual armrest cameras (Brio 100, 32in) to CouchMo URDF"
+  ```
 
 ---
 
-## Task 3: KML/KMZ → waypoints converter (Google Earth traced centerlines)
+## Task 3: KML/KMZ → waypoints converter
 
 **Files:**
 - Create: `simulation/scripts/kml_to_waypoints.py`
 - Create: `training/tests/test_kml_to_waypoints.py`
 
-- [ ] **Step 1: Write failing tests for KML parsing**
-
-```python
-# training/tests/test_kml_to_waypoints.py
-import math
-
-def test_latlon_to_enu_zero_origin():
-    # origin maps to (0,0)
-    origin_lat, origin_lon = 38.0, -121.0
-    lat, lon = origin_lat, origin_lon
-    # expect exactly zero within tolerance
-    assert True
-```
+- [ ] **Step 1: Real failing tests for KML parsing**
+  - `test_latlon_to_enu_zero_origin`: origin maps exactly to `(0,0)` within 1e-6 m.
+  - `test_latlon_to_enu_known_offset`: a known displacement (e.g. 0.001° lat ≈ 111.32 m) is correct within 0.5 m at campus latitudes.
+  - `test_parse_linestring`: synthetic KML fixture from Task 0 yields the expected number of waypoints in the right order.
+  - `test_parse_kmz`: same fixture wrapped as `.kmz` (zip) yields identical waypoints.
+  - **No `assert True` stubs.**
 
 - [ ] **Step 2: Run tests (expect fail)**
+  ```bash
+  cd training && python -m pytest tests/test_kml_to_waypoints.py -q
+  ```
 
-```bash
-python -m pytest -q
-```
-
-- [ ] **Step 3: Implement minimal KML reader + ENU projection**
-  - Support: KML LineString coordinates.
-  - Support: KMZ by unzipping and reading the contained KML.
-  - Output: CSV with columns `x_m,y_m` and optional `s_m` arc-length.
+- [ ] **Step 3: Implement**
+  - Use stdlib `xml.etree.ElementTree` for KML, `zipfile` for KMZ. No new deps.
+  - ENU projection: tangent-plane approximation, fine for campus-scale.
+  - Output: CSV with columns `x_m, y_m, s_m` where `s_m` is cumulative arc-length.
+  - CLI: `python kml_to_waypoints.py --in path.kml --out path.csv --origin-lat X --origin-lon Y`.
 
 - [ ] **Step 4: Run tests (expect pass)**
 
-```bash
-python -m pytest -q
-```
-
 - [ ] **Step 5: Commit**
-
-```bash
-git add simulation/scripts/kml_to_waypoints.py training/tests/test_kml_to_waypoints.py
-git commit -m "tools: convert Google Earth KML/KMZ routes to local waypoints"
-```
+  ```bash
+  git add simulation/scripts/kml_to_waypoints.py training/tests/test_kml_to_waypoints.py
+  git commit -m "tools: convert Google Earth KML/KMZ routes to local ENU waypoints"
+  ```
 
 ---
 
-## Task 4: Generate a hybrid campus SDF world from waypoints
+## Task 4: Generate hybrid campus SDF world from waypoints
 
 **Files:**
 - Create: `simulation/scripts/generate_campus_world.py`
-- Create: `simulation/src/couchmo_description/worlds/flc_googleearth.world` (generated output, checked in for reproducibility)
+- Create: `simulation/src/couchmo_description/worlds/synthetic_campus.world` (generated from fixture; checked in)
 - Create: `training/tests/test_world_generation.py`
 
-- [ ] **Step 1: Write failing test for world generator output**
-  - Ensure output `.world` contains:
-    - `<world name="...">`
-    - ground plane include
-    - at least one sidewalk ribbon model derived from waypoints
+- [ ] **Step 1: Real failing tests**
+  - Output `.world` is well-formed XML.
+  - Contains `<world name="...">`, ground plane include, ≥1 sidewalk ribbon model derived from input waypoints.
+  - Sidewalk ribbon length within 5% of waypoint arc-length.
 
 - [ ] **Step 2: Implement generator**
-  - Use waypoints to create sidewalk ribbon segments (box strips) with collision + simple visual material.
-  - Add a few static obstacles templates (benches/signs) with deterministic random seed.
-  - Provide config for corridor width and sidewalk strip width.
+  - Read waypoints CSV from Task 3.
+  - Emit `.world` with sidewalk ribbon strips (boxes) along consecutive waypoint pairs.
+  - Configurable corridor width (default 3.0 m) and visual sidewalk strip width (default 1.5 m).
+  - Sprinkle a few static obstacle templates (benches/signs) with deterministic seed.
+  - CLI: `python generate_campus_world.py --waypoints path.csv --out path.world [--seed 0]`.
 
-- [ ] **Step 3: Integrate with launch**
-  - Ensure `gazebo.launch.py` can launch with `world:=flc_googleearth`.
+- [ ] **Step 3: Generate the synthetic-campus world from Task 0's fixture**
+  ```bash
+  python simulation/scripts/kml_to_waypoints.py \
+    --in simulation/scripts/fixtures/synthetic_campus.kml \
+    --out simulation/scripts/fixtures/synthetic_campus.csv \
+    --origin-lat <fixture_origin> --origin-lon <fixture_origin>
+  python simulation/scripts/generate_campus_world.py \
+    --waypoints simulation/scripts/fixtures/synthetic_campus.csv \
+    --out simulation/src/couchmo_description/worlds/synthetic_campus.world
+  ```
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 4: Wire into launch**
+  - `gazebo.launch.py` accepts `world:=synthetic_campus` (and `world:=flc_googleearth` later).
 
-```bash
-git add simulation/scripts/generate_campus_world.py simulation/src/couchmo_description/worlds/flc_googleearth.world training/tests/test_world_generation.py simulation/src/couchmo_description/launch/gazebo.launch.py
-git commit -m "sim: generate hybrid campus world from Google Earth waypoints"
-```
+- [ ] **Step 5: Commit**
+  ```bash
+  git add simulation/scripts/generate_campus_world.py simulation/src/couchmo_description/worlds/synthetic_campus.world training/tests/test_world_generation.py simulation/src/couchmo_description/launch/gazebo.launch.py
+  git commit -m "sim: generate hybrid campus world from waypoints (synthetic fixture)"
+  ```
 
 ---
 
-## Task 5: Implement waypoint expert (pure pursuit) producing steer/throttle @10Hz
+## Task 5: Pure-pursuit waypoint expert @10 Hz
 
 **Files:**
-- Create: `simulation/src/couchmo_nav/src/waypoint_expert_node.py`
+- Create: `simulation/src/couchmo_nav/couchmo_nav/waypoint_expert_node.py`
 - Create: `simulation/src/couchmo_nav/launch/waypoint_expert.launch.py`
 - Create: `simulation/src/couchmo_nav/config/waypoint_follower.yaml`
 - Create: `training/tests/test_pure_pursuit.py`
+- Modify: `simulation/src/couchmo_nav/setup.py` (entry point)
 
-- [ ] **Step 1: Write failing tests for pure pursuit**
+- [ ] **Step 1: Real failing tests** (pure logic, no ROS)
+  - `test_straight_path_zero_steer`: pose on the centerline → `|steer| < 1e-3`.
+  - `test_lateral_offset_corrects_toward_centerline`: pose 1 m above centerline → steer sign points down.
+  - `test_throttle_decreases_on_curvature`: high-curvature segment → throttle < cap.
+  - `test_throttle_capped_in_zero_one`: random poses → `0 ≤ throttle ≤ 1`, `-1 ≤ steer ≤ 1`.
 
-```python
-# training/tests/test_pure_pursuit.py
-import numpy as np
+- [ ] **Step 2: Implement expert as plain Python class** in `waypoint_expert_node.py` plus a thin `rclpy.Node` wrapper at the bottom.
+  - Pure-pursuit: lookahead distance scaled by speed.
+  - Throttle scheduling: linear taper with curvature, cap from YAML config.
+  - Publishes `geometry_msgs/Vector3` (x=steer, y=throttle, z=0.0) on `/expert/steer_throttle` at 10 Hz.
 
-def test_straight_path_zero_steer():
-    waypoints = np.array([[0.0, 0.0], [10.0, 0.0]])
-    pose = (0.0, 1.0, 0.0)  # 1m above centerline
-    # Expect steer sign to correct toward centerline (negative in this convention)
-    assert True
-```
+- [ ] **Step 3: YAML config** with `corridor_width_m: 3.0`, `lookahead_min_m`, `lookahead_max_m`, `max_throttle`, `curvature_throttle_gain`.
 
-- [ ] **Step 2: Implement expert node**
-  - Subscribe to pose/odom from sim.
-  - Load waypoints from CSV/YAML.
-  - Compute steer from pure pursuit curvature.
-  - Compute throttle from curvature (slow down on turns).
-  - Publish `(steer, throttle)` on a ROS topic (e.g., `/expert/steer_throttle`).
+- [ ] **Step 4: Launch file** — loads waypoints CSV, starts the node.
 
-- [ ] **Step 3: Run in sim and validate**
-  - Visualize waypoints as markers (optional).
-  - Ensure expert drives along the path.
+- [ ] **Step 5: Register entry point in `setup.py`**.
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 6: Run unit tests (expect pass)**
+  ```bash
+  cd training && python -m pytest tests/test_pure_pursuit.py -q
+  ```
 
-```bash
-git add simulation/src/couchmo_nav/src/waypoint_expert_node.py simulation/src/couchmo_nav/launch/waypoint_expert.launch.py simulation/src/couchmo_nav/config/waypoint_follower.yaml training/tests/test_pure_pursuit.py
-git commit -m "sim: add pure-pursuit waypoint expert producing steer/throttle"
-```
+- [ ] **Step 7: Commit**
+  ```bash
+  git add simulation/src/couchmo_nav/couchmo_nav/waypoint_expert_node.py simulation/src/couchmo_nav/launch/waypoint_expert.launch.py simulation/src/couchmo_nav/config/waypoint_follower.yaml simulation/src/couchmo_nav/setup.py training/tests/test_pure_pursuit.py
+  git commit -m "sim: pure-pursuit waypoint expert producing (steer, throttle) at 10 Hz"
+  ```
 
 ---
 
-## Task 6: Action adapter (steer/throttle → cmd_vel) for current Gazebo diff-drive
+## Task 6: Action adapter (steer/throttle → cmd_vel)
 
 **Files:**
-- Create: `simulation/src/couchmo_nav/src/steer_throttle_to_cmd_vel.py`
+- Create: `simulation/src/couchmo_nav/couchmo_nav/steer_throttle_to_cmd_vel.py`
 - Create: `training/tests/test_action_adapter.py`
+- Modify: `simulation/src/couchmo_nav/setup.py` (entry point)
 
-- [ ] **Step 1: Write failing tests**
-  - Verify mapping preserves:
-    - `throttle=0` → `linear.x=0`
-    - `steer=0` → `angular.z=0`
-    - sign conventions consistent.
+- [ ] **Step 1: Real failing tests** (pure mapping, no ROS)
+  - `throttle=0` → `linear.x == 0`.
+  - `steer=0, throttle>0` → `angular.z == 0`, `linear.x > 0`.
+  - `steer>0, throttle>0` → `angular.z > 0` (matches IRL sign convention from `serial_controller.py` — verify against that file).
+  - Mapping is monotonic in throttle and odd in steer.
 
-- [ ] **Step 2: Implement node**
-  - Subscribe to `/expert/steer_throttle` (and later policy output).
-  - Publish `/cmd_vel` for Gazebo plugin.
-  - Enforce 10 Hz publish rate.
+- [ ] **Step 2: Implement adapter** as plain function + thin `rclpy.Node` wrapper.
+  - Subscribes `/expert/steer_throttle` (later: `/policy/steer_throttle`).
+  - Publishes `/cmd_vel` at 10 Hz (latches latest input).
 
-- [ ] **Step 3: Validate in sim**
-  - Run expert → adapter → couch follows path.
+- [ ] **Step 3: Run unit tests (expect pass).**
 
 - [ ] **Step 4: Commit**
-
-```bash
-git add simulation/src/couchmo_nav/src/steer_throttle_to_cmd_vel.py training/tests/test_action_adapter.py
-git commit -m "sim: adapt steer/throttle commands to cmd_vel for Gazebo"
-```
+  ```bash
+  git add simulation/src/couchmo_nav/couchmo_nav/steer_throttle_to_cmd_vel.py training/tests/test_action_adapter.py simulation/src/couchmo_nav/setup.py
+  git commit -m "sim: adapter mapping (steer, throttle) to cmd_vel at 10 Hz"
+  ```
 
 ---
 
-## Task 7: Dataset recording (images + expert actions)
+## Task 7: Dataset recorder (writes shared `.npz` shards)
 
 **Files:**
-- Create: `training/dataset/record_expert_rollouts.py`
-- Create: `training/dataset/format_dataset.py`
-- Create: `training/README.md`
+- Create: `simulation/src/couchmo_nav/couchmo_nav/dataset_recorder_node.py`
+- Create: `simulation/src/couchmo_nav/launch/record_dataset.launch.py`
+- Create: `training/tests/test_dataset_format.py`
+- Modify: `simulation/src/couchmo_nav/setup.py` (entry point)
 
-- [ ] **Step 1: Implement recorder**
-  - Subscribe to:
-    - `/left_cam/image_raw`, `/right_cam/image_raw`
+**Container path:** writes to `/workspace/data/<episode_id>/shard_<n>.npz` — host-visible at `training/data/...` via the bind mount from Task 1.
+
+- [ ] **Step 1: Tests for `shared/dataset_format.py` round-trip**
+  - Write random shard → read → assert byte-equal arrays.
+  - Manifest JSON round-trip preserves episode metadata.
+
+- [ ] **Step 2: Implement recorder node**
+  - `message_filters.ApproximateTimeSynchronizer` over:
+    - `/left_cam/image_raw`
+    - `/right_cam/image_raw`
     - `/expert/steer_throttle`
-  - Save synchronized samples at 10 Hz with timestamps.
+  - Sample at 10 Hz; flush shards every N samples (e.g. 200).
+  - Writes via `shared.dataset_format.write_shard`.
+  - Updates `manifest.json` per episode.
 
-- [ ] **Step 2: Implement formatter**
-  - Convert raw frames to 84×84 grayscale + 4-frame stacks per camera, matching `model.py`.
-  - Save into a simple dataset layout (`.npz` shards or similar).
-
-- [ ] **Step 3: Smoke test**
-  - Generate 2–5 short episodes and ensure dataset loads.
+- [ ] **Step 3: Smoke test (deferred verification)**
+  - User runs sim + recorder for one short episode; confirms `training/data/<id>/` populated.
+  - Subagent verifies code and round-trip tests only.
 
 - [ ] **Step 4: Commit**
-
-```bash
-git add training/dataset/record_expert_rollouts.py training/dataset/format_dataset.py training/README.md
-git commit -m "train: record expert rollouts and format imitation dataset"
-```
+  ```bash
+  git add simulation/src/couchmo_nav/couchmo_nav/dataset_recorder_node.py simulation/src/couchmo_nav/launch/record_dataset.launch.py training/tests/test_dataset_format.py simulation/src/couchmo_nav/setup.py
+  git commit -m "sim: dataset recorder writes shared .npz shards via bind-mounted volume"
+  ```
 
 ---
 
-## Task 8: Imitation training baseline (behavior cloning)
+## Task 8a: Behavior cloning training (native, no ROS)
 
 **Files:**
+- Create: `training/imitation/model.py`
 - Create: `training/imitation/train_bc.py`
-- Modify: `model.py` (only if necessary to reuse preprocessing; prefer importing)
+- Create: `training/imitation/__init__.py`
 
-- [ ] **Step 1: Define a minimal policy network**
-  - Input: (8,84,84)
-  - Output: 2 floats (steer, throttle) with appropriate activation/clamping.
+- [ ] **Step 1: Define the policy network** in `model.py`
+  - Input: `(8, 84, 84) float32` (matches `shared.preprocess`).
+  - Small CNN (think Atari-DQN-ish): 3 conv layers + 2 FC.
+  - Output: `(steer, throttle)`. Steer via `tanh`, throttle via `sigmoid`.
+  - **Constraint:** must export to ONNX cleanly and run on CPU at < 50 ms per inference.
 
-- [ ] **Step 2: Training loop**
-  - Dataset loader, train/val split, basic metrics.
+- [ ] **Step 2: Training loop** in `train_bc.py`
+  - CLI: `--data-root ./data --epochs N --batch-size N --device cpu|cuda --out ./checkpoints/bc.pt`.
+  - Default `--data-root` is `./data` (matches Task 1 bind mount).
+  - Dataset reader uses `shared.dataset_format`.
+  - Train/val split, MSE loss on `(steer, throttle)`, basic metrics (steer MAE, throttle MAE).
+  - Saves `bc.pt` checkpoint + `bc_meta.json` (config, metrics).
 
-- [ ] **Step 3: Eval in sim**
-  - Run trained policy in sim via ROS topics.
+- [ ] **Step 3: Smoke test on tiny synthetic dataset**
+  - Generate 50 random samples in test fixture form.
+  - Run 1 epoch, assert loss decreases.
 
 - [ ] **Step 4: Commit**
+  ```bash
+  git add training/imitation/model.py training/imitation/train_bc.py training/imitation/__init__.py
+  git commit -m "train: behavior cloning loop (native, no ROS) with shared preprocess"
+  ```
 
-```bash
-git add training/imitation/train_bc.py training/imitation/eval_in_sim.py
-git commit -m "train: add behavior cloning baseline and sim evaluation"
-```
+---
+
+## Task 8b: ONNX export + numerical equivalence check
+
+**Files:**
+- Create: `training/imitation/export_onnx.py`
+- Create: `training/tests/test_onnx_export.py`
+
+- [ ] **Step 1: Export script**
+  - Loads a `.pt` checkpoint, runs `torch.onnx.export(model, dummy_input, path, opset_version=17, dynamic_axes={'input': {0: 'batch'}})`.
+  - Validates with `onnx.checker.check_model`.
+  - Writes `model.onnx` next to `model.pt`.
+
+- [ ] **Step 2: Equivalence test**
+  - `test_onnx_export.py`: train a 1-step model, export, run same input through both Torch and ONNX Runtime, assert max abs diff < 1e-4.
+
+- [ ] **Step 3: Commit**
+  ```bash
+  git add training/imitation/export_onnx.py training/tests/test_onnx_export.py
+  git commit -m "train: ONNX export with numerical-equivalence test against Torch"
+  ```
+
+---
+
+## Task 8c: Eval in sim (ROS-gated)
+
+**Files:**
+- Create: `training/imitation/eval_in_sim.py`
+
+- [ ] **Step 1: Implement**
+  - At top of file:
+    ```python
+    try:
+        import rclpy
+        from rclpy.node import Node
+        ROS_AVAILABLE = True
+    except ImportError:
+        ROS_AVAILABLE = False
+    ```
+  - If invoked without ROS, print clear message and exit 0 (not 1).
+  - Loads `.onnx` (preferred) or `.pt`, subscribes camera topics, publishes `/policy/steer_throttle`.
+
+- [ ] **Step 2: Verify import gate**
+  - On bare Windows desktop without ROS installed, `python -m training.imitation.eval_in_sim --help` prints help and exits cleanly.
+
+- [ ] **Step 3: Commit**
+  ```bash
+  git add training/imitation/eval_in_sim.py
+  git commit -m "train: in-sim eval node with optional ROS import gate"
+  ```
 
 ---
 
@@ -311,40 +534,123 @@ git commit -m "train: add behavior cloning baseline and sim evaluation"
 
 **Files:**
 - Create: `training/rl/train_ppo.py`
+- Create: `training/rl/__init__.py`
 
-- [ ] **Step 1: Define rewards + termination**
-  - progress along arc-length
-  - corridor penalty (3.0m)
-  - collisions
-  - smoothness
+- [ ] **Step 1: Rewards + termination**
+  - Progress along arc-length, corridor penalty (3.0 m), collision penalty, smoothness penalty.
 
-- [ ] **Step 2: Implement PPO training harness**
-  - Wrap sim stepping at 10 Hz.
+- [ ] **Step 2: PPO harness**
+  - Wrap sim stepping at 10 Hz via the same ROS bridge as `eval_in_sim.py` (gated import).
   - Start from BC checkpoint.
+  - Saves both `.pt` and `.onnx`.
 
 - [ ] **Step 3: Commit**
-
-```bash
-git add training/rl/train_ppo.py
-git commit -m "train: add PPO fine-tune harness (optional)"
-```
+  ```bash
+  git add training/rl/train_ppo.py training/rl/__init__.py
+  git commit -m "train: PPO fine-tune harness starting from BC checkpoint (optional)"
+  ```
 
 ---
 
-## Self-review checklist (run after writing plan)
+## Task 10: `runtime/drive.py` — on-laptop inference loop
 
-- Spec coverage: cameras, world generation, expert, imitation, optional RL, 10 Hz interface, corridor=3.0m.
-- No placeholders: replace any `assert True` stubs with real asserts during implementation.
-- Type/sign consistency: confirm steer sign conventions match IRL and adapter.
+**This is the deploy target.** Must install with `pip install -r runtime/requirements.txt` on a fresh Windows or Mac Python 3.10+ venv. **Zero ROS, zero Docker, zero Torch.**
+
+**Files:**
+- Create: `runtime/drive.py`
+- Create: `runtime/camera.py`
+- Create: `runtime/control.py`
+- Create: `runtime/inference.py`
+- Create: `runtime/tests/test_inference_smoke.py`
+- Create: `runtime/tests/test_replay.py`
+
+- [ ] **Step 1: `runtime/inference.py`**
+  - `class Policy: __init__(onnx_path); predict(stacked_frames) -> (steer, throttle)`.
+  - Uses `onnxruntime.InferenceSession` with CPU provider only.
+  - Imports and uses `shared.preprocess.FrameStacker` so preprocessing is identical to training.
+
+- [ ] **Step 2: `runtime/camera.py`**
+  - `DualCamera(left_index, right_index)` with `.read() -> (left_bgr, right_bgr)`.
+  - Cross-platform: OpenCV `VideoCapture` works the same on Win/Mac/Linux.
+  - Discovers indices via small `list_cameras()` helper.
+
+- [ ] **Step 3: `runtime/control.py`**
+  - Wraps `serial_controller.py`. Accepts port string (`COM3` on Windows, `/dev/tty.usbserial-XXXX` on Mac, `/dev/ttyUSB0` on Linux).
+  - Single method: `send(steer, throttle)`.
+
+- [ ] **Step 4: `runtime/drive.py` main**
+  - CLI:
+    ```
+    python -m runtime.drive --source live  --left-cam 0 --right-cam 1 --port COM3 --model model.onnx --rate 10
+    python -m runtime.drive --source replay --episode path/to/episode.npz --model model.onnx
+    ```
+  - 10 Hz loop with monotonic timing (`time.perf_counter`). Logs deadline misses.
+  - `--source live`: real cameras + serial.
+  - `--source replay`: reads `.npz` episode (via `shared.dataset_format`), feeds frames through Policy, prints predicted vs recorded actions side-by-side. **No serial sent in replay mode.**
+  - Graceful shutdown on Ctrl-C (zero throttle final command in live mode).
+
+- [ ] **Step 5: Tests**
+  - `test_inference_smoke.py`: load a tiny ONNX model (or generate one in fixture), feed random input, assert outputs in correct ranges.
+  - `test_replay.py`: run `--source replay` against a 10-frame fixture episode; assert it completes and prints comparable actions.
+
+- [ ] **Step 6: `runtime/README.md`**
+  - Windows install (PowerShell venv, `pip install -r runtime/requirements.txt`).
+  - Mac install (bash venv).
+  - COM port discovery on each OS.
+  - Camera index discovery.
+  - One-liner sanity command: `python -m runtime.drive --source replay --episode samples/tiny_episode.npz --model checkpoints/bc.onnx`.
+
+- [ ] **Step 7: Commit**
+  ```bash
+  git add runtime/
+  git commit -m "runtime: on-laptop inference loop (ONNX, OpenCV, pyserial) with replay mode"
+  ```
+
+---
+
+## Self-review checklist (run after each task and at end)
+
+**Cross-platform hygiene:**
+- All Python uses `pathlib.Path`; no raw `/` separators.
+- No POSIX-only assumptions in `training/` or `runtime/` (no `/tmp`, no `os.uname`, no `os.path.expanduser('~/...')` without `Path.home()`).
+- All shell scripts have a `.ps1` counterpart where intended for host execution.
+- `.gitattributes` line endings respected.
+
+**Surface isolation:**
+- `runtime/` imports nothing from `simulation/` or `training/imitation/` (only `shared/`).
+- `training/imitation/train_bc.py` and `model.py` import nothing from `rclpy`.
+- `simulation/` ROS code does not import from `training/imitation/`.
+
+**Spec coverage:**
+- Cameras at 0.8128 m, 10 Hz, both cameras, FOV approximated.
+- World generation produces a checked-in synthetic world for repeatability.
+- Expert produces `(steer ∈ [-1,1], throttle ∈ [0,1])` at exactly 10 Hz.
+- Action adapter sign conventions match `serial_controller.py`.
+- Dataset format identical between sim writer and training reader.
+- Preprocessing identical between training and runtime (single source: `shared/preprocess.py`).
+- ONNX numerically equivalent to `.pt` (max abs diff < 1e-4).
+- Runtime installs without torch, ROS, or Docker.
+
+**Discipline:**
+- No `assert True` placeholders left in any test.
+- No Tasks 8/9 features bled into Task 10 or vice versa.
 
 ---
 
 ## Execution handoff
 
-Plan complete and saved to `docs/superpowers/plans/2026-04-15-campus-sim-training-plan.md`. Two execution options:
+Plan complete and saved to `docs/superpowers/plans/2026-04-15-campus-sim-training-plan.md`.
 
-1. **Subagent-Driven (recommended)** — I dispatch a fresh subagent per task, review between tasks, fast iteration  
-2. **Inline Execution** — Execute tasks in this session with checkpoints
+**Branch:** `feat/campus-sim` (created in Task 0). No worktree per user direction.
+
+**Verification policy on this Windows host:**
+- Subagents perform code-level + unit-test verification.
+- Live ROS/Gazebo/Docker steps marked "deferred to user" — subagent does NOT block on them.
+- User runs sim manually between tasks where needed.
+
+**Two execution options:**
+
+1. **Subagent-Driven (recommended)** — Controller dispatches a fresh subagent per task, two-stage review (spec then quality) between tasks. Fast iteration.
+2. **Inline Execution** — Execute tasks in this session with checkpoints.
 
 Which approach?
-

@@ -11,3 +11,16 @@ simulation/src/couchmo_nav/maps/*.pgm
 # Git worktrees (local)
 .worktrees/
 worktrees/
+
+# Training artifacts
+training/data/
+training/checkpoints/
+
+# Python caches
+**/__pycache__/
+.pytest_cache/
+.venv/
+
+# Model artifacts
+*.onnx
+*.pt

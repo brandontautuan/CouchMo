@@ -1,0 +1,4 @@
+onnxruntime>=1.17
+opencv-python>=4.8
+pyserial>=3.5
+numpy>=1.24

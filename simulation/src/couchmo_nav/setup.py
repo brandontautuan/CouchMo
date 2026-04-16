@@ -1,0 +1,30 @@
+from pathlib import Path
+from glob import glob
+
+from setuptools import setup
+
+package_name = "couchmo_nav"
+
+setup(
+    name=package_name,
+    version="0.0.1",
+    packages=[package_name],
+    data_files=[
+        ("share/ament_index/resource_index/packages",
+            [str(Path("resource") / package_name)]),
+        (str(Path("share") / package_name), ["package.xml"]),
+        (str(Path("share") / package_name / "launch"), glob("launch/*.py")),
+        (str(Path("share") / package_name / "config"), glob("config/*.yaml")),
+        (str(Path("share") / package_name / "maps"), glob("maps/*.yaml")),
+    ],
+    install_requires=["setuptools"],
+    zip_safe=True,
+    maintainer="CouchMo Maintainer",
+    maintainer_email="couchmo@example.com",
+    description="CouchMo navigation, training data capture, and runtime inference nodes.",
+    license="MIT",
+    tests_require=["pytest"],
+    entry_points={
+        "console_scripts": [],
+    },
+)
