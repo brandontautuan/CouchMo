@@ -17,6 +17,7 @@ import onnx
 import torch
 
 from training.imitation.model import BCPolicy
+from training.imitation.train_bc import BC_META_SCHEMA
 
 # Fixed spatial input shape (channels, height, width) that matches FrameStacker output.
 _IN_CHANNELS = 8
@@ -70,10 +71,10 @@ def export(
         import json
         meta = json.loads(meta_path.read_text(encoding="utf-8"))
         schema = meta.get("schema", "")
-        if not schema.startswith("bc_meta/"):
+        if schema != BC_META_SCHEMA:
             raise ValueError(
                 f"Sibling meta file {meta_path} has unexpected schema "
-                f"'{schema}'; expected 'bc_meta/v1'. Is this a Task-8a checkpoint?"
+                f"'{schema}'; expected '{BC_META_SCHEMA}'. Is this a Task-8a checkpoint?"
             )
 
     ckpt = torch.load(str(pt_path), weights_only=True)

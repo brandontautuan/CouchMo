@@ -18,16 +18,17 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-import torch
-import torch.nn as nn
 
 # Guard at import time — the three packages must all be present.
+# Order matters: importorskip must precede any hard torch import, or pytest
+# collection fails on torchless hosts instead of skipping cleanly.
 torch = pytest.importorskip("torch")
 onnx = pytest.importorskip("onnx")
 ort = pytest.importorskip("onnxruntime")
+import torch.nn as nn  # noqa: E402 — safe now that torch is confirmed available
 
-from training.imitation.model import BCPolicy
-from training.imitation.export_onnx import export
+from training.imitation.model import BCPolicy  # noqa: E402
+from training.imitation.export_onnx import export  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
