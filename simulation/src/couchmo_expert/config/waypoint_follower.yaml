@@ -1,0 +1,28 @@
+waypoint_expert:
+  ros__parameters:
+    # Required at runtime; the launch file forwards an absolute path
+    # in via the `waypoints_csv:=...` launch argument.
+    waypoints_csv: ""
+    odom_topic: /odom
+    output_topic: /expert/steer_throttle
+    publish_rate_hz: 10.0
+    # Soft corridor around the waypoint centerline (metres). Not used
+    # by the pure-pursuit law itself but surfaced for downstream
+    # corridor-violation / dataset-filter tools.
+    corridor_width_m: 3.0
+    # Lookahead schedule: linear from lookahead_min_m at 0 m/s to
+    # lookahead_max_m at lookahead_speed_cap_mps (saturates above that).
+    lookahead_min_m: 1.0
+    lookahead_max_m: 4.0
+    lookahead_speed_cap_mps: 2.0
+    # Throttle surface. throttle = max_throttle * (1 - gain * |kappa|),
+    # clipped to [0, max_throttle].
+    max_throttle: 0.6
+    curvature_throttle_gain: 1.0
+    # Wheelbase is informational for CouchMo's differential drive — it
+    # does not enter the curvature-to-steer mapping on a diff-drive
+    # platform but is retained for parameter-surface parity.
+    wheelbase_m: 0.6
+    # Curvature magnitude (1/m) that maps to full-left / full-right
+    # steer. Higher => less aggressive steer for a given curvature.
+    max_curvature_at_full_steer: 1.0

@@ -24,6 +24,8 @@ setup(
     license="MIT",
     tests_require=["pytest"],
     entry_points={
-        "console_scripts": [],
+        "console_scripts": [
+            "waypoint_expert_node = couchmo_expert.waypoint_expert_node:main",
+        ],
     },
 )
