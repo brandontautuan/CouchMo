@@ -149,12 +149,9 @@ def _run_replay(args: argparse.Namespace) -> int:
     )
 
     policy = Policy(args.model)
-    # Import preprocess locally so module import stays minimal.
-    from shared.preprocess import preprocess_pair  # noqa: PLC0415
 
     for i in range(n):
-        pair = preprocess_pair(left[i], right[i])
-        ps, pt = policy.predict_from_pair(pair)
+        ps, pt = policy.predict(left[i], right[i])
         rs = float(steer_rec[i])
         rt = float(throttle_rec[i])
         print(
@@ -204,15 +201,26 @@ def _run_live(args: argparse.Namespace) -> int:
 
     previous_handler = signal.signal(signal.SIGINT, _on_sigint)
 
-    policy = Policy(args.model)
-    period = 1.0 / float(args.rate)
-
-    logger.info(
-        "live: cams=(%d,%d)  port=%s  model=%s  rate=%.1f Hz",
-        args.left_cam, args.right_cam, args.port, args.model, args.rate,
-    )
-
+    # Wrap everything — including Policy load — so the signal handler is
+    # always restored even if the ONNX file is bad or incompatible.
+    camera_failure = False
     try:
+        policy = Policy(args.model)
+        period = 1.0 / float(args.rate)
+
+        logger.info(
+            "live: cams=(%d,%d)  port=%s  model=%s  rate=%.1f Hz",
+            args.left_cam, args.right_cam, args.port, args.model, args.rate,
+        )
+
+        # Aggregate deadline-miss reporting.  We log at most once per second
+        # with a count + worst-case so a persistently slow host produces a
+        # readable summary rather than 10 WARNINGs/sec of spam.
+        _MISS_LOG_PERIOD_S = 1.0
+        misses_since_log = 0
+        worst_miss_ms = 0.0
+        last_miss_log_perf = time.perf_counter()
+
         with DualCamera(left_index=args.left_cam, right_index=args.right_cam) as cams, \
                 Controller(port=args.port) as ctl:
             next_tick = time.perf_counter()
@@ -222,6 +230,7 @@ def _run_live(args: argparse.Namespace) -> int:
                     left_bgr, right_bgr = cams.read()
                 except RuntimeError as exc:
                     logger.error("camera read failed: %s — stopping", exc)
+                    camera_failure = True
                     break
 
                 steer, throttle = policy.predict(left_bgr, right_bgr)
@@ -238,18 +247,30 @@ def _run_live(args: argparse.Namespace) -> int:
                 if sleep_for > 0:
                     time.sleep(sleep_for)
                 else:
-                    logger.warning(
-                        "deadline miss: %.1f ms late (tick %d)",
-                        -sleep_for * 1000.0, tick_count,
-                    )
-                    # Resync so we don't chase a receding deadline.
-                    next_tick = time.perf_counter()
-
-            # Fall through to finally — stop() runs there.
+                    late_ms = -sleep_for * 1000.0
+                    misses_since_log += 1
+                    if late_ms > worst_miss_ms:
+                        worst_miss_ms = late_ms
+                    now = time.perf_counter()
+                    if now - last_miss_log_perf >= _MISS_LOG_PERIOD_S:
+                        logger.warning(
+                            "deadline miss: %d ticks late in last %.1fs "
+                            "(worst %.1f ms; tick %d)",
+                            misses_since_log,
+                            now - last_miss_log_perf,
+                            worst_miss_ms,
+                            tick_count,
+                        )
+                        misses_since_log = 0
+                        worst_miss_ms = 0.0
+                        last_miss_log_perf = now
+                    next_tick = now  # resync so we don't chase a receding deadline
     finally:
-        # Restore the previous signal handler before the function returns.
         signal.signal(signal.SIGINT, previous_handler)
 
+    if camera_failure:
+        logger.info("live mode exited after camera failure")
+        return 1
     logger.info("live mode exited cleanly")
     return 0
 

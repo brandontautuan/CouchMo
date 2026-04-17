@@ -43,7 +43,9 @@ def test_predict_from_stacked_returns_float_tuple(tiny_onnx_model: Path) -> None
     rng = np.random.default_rng(42)
     stacked = rng.random((8, 84, 84), dtype=np.float32)
 
-    result = policy.predict_from_stacked(stacked)
+    # Non-public path — exercised by tests so the ONNX session can be driven
+    # without touching FrameStacker.  Production code uses predict().
+    result = policy._predict_from_stacked(stacked)
 
     assert isinstance(result, tuple) and len(result) == 2
     steer, throttle = result
@@ -53,19 +55,6 @@ def test_predict_from_stacked_returns_float_tuple(tiny_onnx_model: Path) -> None
     assert _THROTTLE_LOW <= throttle <= _THROTTLE_HIGH, (
         f"throttle={throttle} out of loose range"
     )
-
-
-def test_predict_from_pair_uses_framestacker(tiny_onnx_model: Path) -> None:
-    """Feeding a (2, 84, 84) preprocessed pair runs through the internal stacker."""
-    policy = Policy(tiny_onnx_model)
-    rng = np.random.default_rng(7)
-    pair = rng.integers(0, 256, size=(2, 84, 84), dtype=np.uint8)
-
-    steer, throttle = policy.predict_from_pair(pair)
-
-    assert isinstance(steer, float) and isinstance(throttle, float)
-    assert _STEER_LOW <= steer <= _STEER_HIGH
-    assert _THROTTLE_LOW <= throttle <= _THROTTLE_HIGH
 
 
 def test_predict_from_raw_bgr_pair(tiny_onnx_model: Path) -> None:
@@ -84,13 +73,18 @@ def test_predict_from_raw_bgr_pair(tiny_onnx_model: Path) -> None:
 
 
 def test_reset_clears_stacker(tiny_onnx_model: Path) -> None:
-    """Policy.reset() drops the frame history without breaking subsequent calls."""
+    """Policy.reset() empties the internal frame buffer, then the next push re-primes it."""
     policy = Policy(tiny_onnx_model)
     rng = np.random.default_rng(1)
-    pair = rng.integers(0, 256, size=(2, 84, 84), dtype=np.uint8)
+    left = rng.integers(0, 256, size=(120, 160, 3), dtype=np.uint8)
+    right = rng.integers(0, 256, size=(120, 160, 3), dtype=np.uint8)
 
-    policy.predict_from_pair(pair)
+    policy.predict(left, right)
+    # After one push, the stacker is full (auto-fills to num_frames on first push).
+    assert len(policy._stacker._buf) == policy._stacker.num_frames
     policy.reset()
-    # Next call must still succeed (i.e. stacker re-primes from this frame).
-    steer, throttle = policy.predict_from_pair(pair)
+    # reset() clears the buffer so the next predict will re-prime from scratch.
+    assert len(policy._stacker._buf) == 0
+    steer, throttle = policy.predict(left, right)
     assert isinstance(steer, float) and isinstance(throttle, float)
+    assert len(policy._stacker._buf) == policy._stacker.num_frames

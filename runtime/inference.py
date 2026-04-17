@@ -60,7 +60,10 @@ class Policy:
     def predict(
         self, left_bgr: np.ndarray, right_bgr: np.ndarray
     ) -> tuple[float, float]:
-        """Run inference on a raw stereo BGR pair from the cameras.
+        """Run inference on a raw stereo BGR pair.
+
+        Used by both live mode (live camera frames) and replay mode (raw BGR
+        stored in shards), so runtime has one public inference entry point.
 
         Args:
             left_bgr: ``(H, W, 3)`` uint8 BGR frame (any H, W).
@@ -71,30 +74,19 @@ class Policy:
             (or the serial controller) is responsible for clipping.
         """
         pair = preprocess_pair(left_bgr, right_bgr)
-        return self.predict_from_pair(pair)
-
-    def predict_from_pair(self, pair: np.ndarray) -> tuple[float, float]:
-        """Run inference on an already-preprocessed stereo pair.
-
-        Args:
-            pair: ``(2, 84, 84)`` uint8 stereo pair (e.g. from a recorded
-                shard that has already been through :func:`preprocess_pair`).
-
-        Returns:
-            ``(steer, throttle)`` as Python floats.
-        """
         stacked = self._stacker.push(pair)
-        return self.predict_from_stacked(stacked)
+        return self._predict_from_stacked(stacked)
 
-    def predict_from_stacked(self, stacked: np.ndarray) -> tuple[float, float]:
-        """Run inference on an already-stacked observation.
+    def _predict_from_stacked(self, stacked: np.ndarray) -> tuple[float, float]:
+        """Run inference on an already-stacked observation (internal).
+
+        Exposed (underscore-prefixed) for tests that want to drive the ONNX
+        session directly without exercising ``FrameStacker`` — production
+        code should always use :meth:`predict`.
 
         Args:
             stacked: ``(8, 84, 84)`` float32 in ``[0, 1]`` — the direct output
                 of ``FrameStacker.push``.
-
-        Returns:
-            ``(steer, throttle)`` as Python floats.
         """
         if stacked.ndim != 3:
             raise ValueError(
@@ -103,7 +95,6 @@ class Policy:
 
         x = stacked.astype(np.float32, copy=False)[np.newaxis, ...]
         out = self._session.run(None, {self._input_name: x})[0]
-        # Model output: (1, 2) float32 = (steer, throttle).
         steer = float(out[0, 0])
         throttle = float(out[0, 1])
         return steer, throttle
