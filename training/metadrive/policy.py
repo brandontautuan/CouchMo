@@ -76,6 +76,10 @@ class CouchMoActorCriticPolicy(ActorCriticPolicy):
         kwargs.setdefault("features_extractor_class", CouchMoFeaturesExtractor)
         kwargs.setdefault("net_arch", [])  # no extra MLP; features_extractor goes straight to heads
         kwargs.setdefault("share_features_extractor", True)
+        # use_sde is silently overwritten by our _build override, so lock it off
+        # to prevent a caller's gSDE request from being discarded without warning.
+        if kwargs.get("use_sde", False):
+            raise ValueError("CouchMoActorCriticPolicy does not support use_sde=True")
         super().__init__(observation_space, action_space, lr_schedule, **kwargs)
 
     def _build(self, lr_schedule: Callable[[float], float]) -> None:
@@ -85,6 +89,9 @@ class CouchMoActorCriticPolicy(ActorCriticPolicy):
         self.value_net = nn.Linear(FEATURE_DIM, 1)
 
         # Diagonal Gaussian with learnable log_std (one scalar per action dim).
+        # log_std_init = -0.5 -> σ ≈ 0.61; a tighter prior than SB3's default 0.0
+        # (σ = 1.0), chosen for the BC warm-start case where the mean is already
+        # close to the expert and we want exploration to be modest.
         self.action_dist = DiagGaussianDistribution(action_dim=2)
         self.log_std = nn.Parameter(torch.zeros(2) - 0.5, requires_grad=True)
 
