@@ -5,8 +5,8 @@ ROS 2 + Gazebo simulation, fully containerized. The only host requirements are
 is served via **noVNC** on port 6081, so there is nothing to install for X11,
 XQuartz, VcXsrv, etc.
 
-Open `http://localhost:6081/vnc.html` in any browser after the container
-starts.
+Open `http://localhost:6081/vnc.html` in any browser after the `sim`
+container starts (or `http://localhost:6080/vnc.html` for `preview`).
 
 ## Bringup
 
@@ -20,12 +20,12 @@ check for Docker, the noVNC port, and host RAM) and then `docker compose up`.
 
 ## Modes
 
-| Mode       | What it does                                                  |
-| ---------- | ------------------------------------------------------------- |
-| `sim`      | Full Gazebo + ROS 2 + noVNC. Open `http://localhost:6081/vnc.html`. |
-| `preview`  | URDF / RViz preview only (faster boot). Same noVNC URL.       |
-| `shell`    | Interactive `bash` inside the sim image — no services started. |
-| `headless` | Runs `sim_headless` (no noVNC port) for batch dataset gen.    |
+| Mode       | What it does                                                                     |
+| ---------- | -------------------------------------------------------------------------------- |
+| `sim`      | Full Gazebo + ROS 2 + noVNC. Open `http://localhost:6081/vnc.html`.              |
+| `preview`  | URDF / RViz preview only (faster boot). Open `http://localhost:6080/vnc.html`.   |
+| `shell`    | Interactive `bash` inside the sim image — no services started.                   |
+| `headless` | Runs `sim_headless` (no noVNC port) for batch dataset gen.                       |
 
 Examples:
 

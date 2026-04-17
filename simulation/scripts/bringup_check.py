@@ -91,7 +91,7 @@ def check_port_free(port: int) -> None:
     finally:
         sock.close()
 
-    _print_ok(f"Port {port} is free.")
+    _print_ok(f"Port {port} appears free on loopback.")
 
 
 def _ram_gb_windows() -> float | None:

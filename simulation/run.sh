@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 # run.sh — one-command launcher for the CouchMo sim (macOS / Linux).
-# The sim UI is served via noVNC at http://localhost:6081/vnc.html,
-# so no X11 forwarding / XQuartz is needed.
+# The sim UI is served via noVNC, so no X11 forwarding is needed on any host.
 
 set -euo pipefail
 
@@ -13,15 +12,16 @@ cd "$SCRIPT_DIR"
 echo "Running preflight check..."
 python3 scripts/bringup_check.py
 
-NOVNC_URL="http://localhost:6081/vnc.html"
+NOVNC_URL_SIM="http://localhost:6081/vnc.html"
+NOVNC_URL_PREVIEW="http://localhost:6080/vnc.html"
 
 case "$MODE" in
   sim)
-    echo "Starting Gazebo sim. Open: $NOVNC_URL"
+    echo "Starting Gazebo sim. Open: $NOVNC_URL_SIM"
     docker compose up sim
     ;;
   preview)
-    echo "Starting URDF preview. Open: $NOVNC_URL"
+    echo "Starting URDF preview. Open: $NOVNC_URL_PREVIEW"
     docker compose up preview
     ;;
   headless)
@@ -34,8 +34,8 @@ case "$MODE" in
     ;;
   *)
     echo "Usage: $0 [sim|preview|shell|headless]"
-    echo "  sim      — full Gazebo sim, view in browser at $NOVNC_URL"
-    echo "  preview  — URDF/RViz preview, view in browser at $NOVNC_URL"
+    echo "  sim      — full Gazebo sim, view in browser at $NOVNC_URL_SIM"
+    echo "  preview  — URDF/RViz preview, view in browser at $NOVNC_URL_PREVIEW"
     echo "  headless — sim without noVNC (batch dataset generation)"
     echo "  shell    — interactive bash inside the sim container"
     exit 2
