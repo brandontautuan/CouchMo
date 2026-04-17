@@ -137,6 +137,7 @@ class CouchMoMetaDriveEnv(gym.Env):
         right_bgr = self._read_camera_rgb("right_cam")
         pair = preprocess_pair(left_bgr, right_bgr)  # (2, 84, 84) uint8
         return self._stacker.push(pair)              # (8, 84, 84) float32
+
     def _to_metadrive_action(self, action: np.ndarray) -> np.ndarray:
         """Convert policy action [steer, throttle] -> MetaDrive [steering, throttle_brake].
 
