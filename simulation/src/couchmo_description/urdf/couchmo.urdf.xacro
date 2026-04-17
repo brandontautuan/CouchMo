@@ -38,6 +38,18 @@
   <xacro:property name="caster_x"    value="0.55"/>   <!-- forward of center -->
   <xacro:property name="caster_y"    value="0.68"/>   <!-- inboard of drive wheels -->
 
+  <!-- Armrest cameras (Logitech Brio 100): one per armrest, facing forward.
+       armrest_z is the absolute mount height above ground (32 inches).
+       Since cameras parent to chassis_link (which sits at z=wheel_r above ground),
+       the local z origin on the joint is (armrest_z - wheel_r).
+       armrest_inset is how far inboard from the body's outer side the camera sits. -->
+  <xacro:property name="armrest_z"     value="0.8128"/>   <!-- 32"  above ground -->
+  <xacro:property name="armrest_inset" value="0.10"/>     <!-- 100 mm inboard from armrest outer face -->
+  <xacro:property name="cam_hfov"      value="1.361"/>    <!-- ≈ 78° Brio 100 HFOV (rad) -->
+  <xacro:property name="cam_rate"      value="10.0"/>     <!-- Hz, matches policy control rate -->
+  <xacro:property name="cam_w"         value="640"/>
+  <xacro:property name="cam_h"         value="480"/>
+
   <!-- Masses (kg) — couch body ~45 kg, each wheel ~2 kg, rider up to 130 kg -->
   <xacro:property name="body_mass"   value="45.0"/>
   <xacro:property name="wheel_mass"  value="2.0"/>
@@ -299,6 +311,86 @@
       <inertia ixx="1e-4" ixy="0" ixz="0" iyy="1e-4" iyz="0" izz="1e-4"/>
     </inertial>
   </link>
+
+  <!-- ═══════════════════════════════════════════════
+       ARMREST CAMERAS  (two Logitech Brio 100, one per armrest)
+       - Mounted at 32" above ground, ±(body_w/2 - armrest_inset) laterally.
+       - Each camera link has a small visual cube + inertial so RViz/Gazebo
+         render it. An _optical child link follows REP-103 (z-fwd, x-right,
+         y-down) so projected pixels work without extra TF gymnastics.
+  ══════════════════════════════════════════════════ -->
+
+  <xacro:macro name="armrest_camera" params="prefix y_sign">
+    <joint name="${prefix}_camera_joint" type="fixed">
+      <parent link="chassis_link"/>
+      <child  link="${prefix}_camera_link"/>
+      <!-- chassis_link sits at z=wheel_r above ground; subtract to get local z -->
+      <origin xyz="0 ${y_sign * (body_w/2 - armrest_inset)} ${armrest_z - wheel_r}"
+              rpy="0 0 0"/>
+    </joint>
+
+    <link name="${prefix}_camera_link">
+      <visual>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry><box size="0.05 0.05 0.05"/></geometry>
+        <material name="cam_black"><color rgba="0.05 0.05 0.05 1.0"/></material>
+      </visual>
+      <collision>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry><box size="0.05 0.05 0.05"/></geometry>
+      </collision>
+      <inertial>
+        <mass value="0.001"/>
+        <inertia ixx="1e-7" ixy="0" ixz="0" iyy="1e-7" iyz="0" izz="1e-7"/>
+      </inertial>
+    </link>
+
+    <!-- Optical frame: REP-103 (z forward, x right, y down) -->
+    <joint name="${prefix}_camera_optical_joint" type="fixed">
+      <parent link="${prefix}_camera_link"/>
+      <child  link="${prefix}_camera_link_optical"/>
+      <origin xyz="0 0 0" rpy="${-pi/2} 0 ${-pi/2}"/>
+    </joint>
+
+    <link name="${prefix}_camera_link_optical"/>
+
+    <gazebo reference="${prefix}_camera_link">
+      <sensor name="${prefix}_camera" type="camera">
+        <always_on>true</always_on>
+        <visualize>false</visualize>
+        <update_rate>${cam_rate}</update_rate>
+        <camera name="${prefix}_camera">
+          <horizontal_fov>${cam_hfov}</horizontal_fov>
+          <image>
+            <width>${cam_w}</width>
+            <height>${cam_h}</height>
+            <format>R8G8B8</format>
+          </image>
+          <clip>
+            <near>0.05</near>
+            <far>50.0</far>
+          </clip>
+          <noise>
+            <type>gaussian</type>
+            <mean>0.0</mean>
+            <stddev>0.005</stddev>
+          </noise>
+        </camera>
+        <plugin name="${prefix}_camera_plugin" filename="libgazebo_ros_camera.so">
+          <!-- gazebo_ros_camera publishes <camera_name>/image_raw and
+               <camera_name>/camera_info at the global namespace, yielding
+               /left_cam/image_raw, /left_cam/camera_info,
+               /right_cam/image_raw, /right_cam/camera_info. -->
+          <camera_name>${prefix}_cam</camera_name>
+          <frame_name>${prefix}_camera_link_optical</frame_name>
+          <hack_baseline>0.0</hack_baseline>
+        </plugin>
+      </sensor>
+    </gazebo>
+  </xacro:macro>
+
+  <xacro:armrest_camera prefix="left"  y_sign="1"/>
+  <xacro:armrest_camera prefix="right" y_sign="-1"/>
 
   <!-- ═══════════════════════════════════════════════
        GAZEBO PLUGINS
