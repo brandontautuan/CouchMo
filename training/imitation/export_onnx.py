@@ -43,8 +43,16 @@ def _load_model_from_ppo(zip_path: Path) -> tuple[BCPolicy, int]:
             "pip install -r training/requirements-rl.txt"
         ) from exc
 
+    from training.metadrive.policy import CouchMoFeaturesExtractor
+
     ppo = PPO.load(str(zip_path))
     extractor = ppo.policy.features_extractor
+    if not isinstance(extractor, CouchMoFeaturesExtractor):
+        raise ValueError(
+            f"--from-ppo expects a PPO zip trained with CouchMoActorCriticPolicy; "
+            f"got features_extractor={type(extractor).__name__}. "
+            f"See training.metadrive.train_ppo."
+        )
     in_channels = int(extractor.conv1.in_channels)
 
     model = BCPolicy(in_channels=in_channels)

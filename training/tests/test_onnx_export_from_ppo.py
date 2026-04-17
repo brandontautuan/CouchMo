@@ -45,9 +45,13 @@ def _make_dummy_ppo(path: Path):
         def render(self):
             return None
 
+    torch.manual_seed(0)
     env = DummyVecEnv([lambda: _StubEnv()])
-    model = PPO(CouchMoActorCriticPolicy, env, n_steps=8, batch_size=8, verbose=0)
-    model.save(str(path))
+    try:
+        model = PPO(CouchMoActorCriticPolicy, env, n_steps=8, batch_size=8, verbose=0)
+        model.save(str(path))
+    finally:
+        env.close()
 
 
 def test_from_ppo_export_matches_sb3_output(tmp_path: Path):
@@ -70,7 +74,8 @@ def test_from_ppo_export_matches_sb3_output(tmp_path: Path):
     from stable_baselines3 import PPO
 
     model = PPO.load(str(ppo_zip))
-    x = np.random.rand(4, 8, 84, 84).astype(np.float32)
+    rng = np.random.default_rng(0)
+    x = rng.random((4, 8, 84, 84), dtype=np.float32)
     sb3_action, _ = model.predict(x, deterministic=True)
 
     sess = ort.InferenceSession(str(onnx_path), providers=["CPUExecutionProvider"])
