@@ -77,11 +77,9 @@ def _load_pt(model_path: Path) -> InferFn:
 
     ckpt = torch.load(str(model_path), weights_only=True)
     if not isinstance(ckpt, dict) or "state_dict" not in ckpt or "arch" not in ckpt:
+        keys = list(ckpt.keys()) if isinstance(ckpt, dict) else "N/A"
         raise ValueError(
-            "Checkpoint format not recognized; expected Task-8a format "
-            "{'state_dict': ..., 'arch': {'in_channels': int}}. "
-            f"Got type={type(ckpt).__name__}, "
-            f"keys={list(ckpt.keys()) if isinstance(ckpt, dict) else 'N/A'}"
+            f"Expected Task-8a format {{'state_dict', 'arch'}}; got keys={keys}"
         )
 
     model = BCPolicy(**ckpt["arch"])
@@ -139,8 +137,7 @@ if ROS_AVAILABLE:
     class EvalInSimNode(Node):  # type: ignore[misc,valid-type]
         """ROS 2 node that runs a BC policy on synced stereo frames.
 
-        Parameters (declared on the node; CLI ``--model`` / ``--*-topic`` /
-        ``--rate-hz`` flags override them by passing them through
+        Parameters (declared on the node; CLI flags override them via
         ``parameter_overrides``):
 
         ``model_path`` (str, **required**)
@@ -153,9 +150,9 @@ if ROS_AVAILABLE:
             Policy action topic (default ``/policy/steer_throttle``).
         ``sync_slop_s`` (float)
             ATS slop tolerance in seconds (default 0.05).
-        ``publish_rate_hz`` (float)
-            Informational only — effective publish rate is driven by synced
-            camera arrivals (default 10.0).
+
+        Effective publish rate is driven by synced camera arrivals (URDF
+        cameras run at 10 Hz, matching the action protocol's 10 Hz contract).
         """
 
         def __init__(
@@ -175,7 +172,6 @@ if ROS_AVAILABLE:
             self.declare_parameter("right_topic", "/right_cam/image_raw")
             self.declare_parameter("output_topic", "/policy/steer_throttle")
             self.declare_parameter("sync_slop_s", 0.05)
-            self.declare_parameter("publish_rate_hz", 10.0)
 
             model_path_str = str(self.get_parameter("model_path").value or "")
             if not model_path_str:
@@ -189,7 +185,6 @@ if ROS_AVAILABLE:
             right_topic = str(self.get_parameter("right_topic").value)
             output_topic = str(self.get_parameter("output_topic").value)
             sync_slop = float(self.get_parameter("sync_slop_s").value)
-            rate_hz = float(self.get_parameter("publish_rate_hz").value)
 
             # Load the model eagerly so we fail fast if the file is missing
             # or the suffix is unsupported (rather than on the first frame).
@@ -215,8 +210,7 @@ if ROS_AVAILABLE:
             self.get_logger().info(
                 f"eval_in_sim: model='{model_path}', "
                 f"left='{left_topic}', right='{right_topic}', "
-                f"output='{output_topic}', sync_slop={sync_slop}s, "
-                f"publish_rate_hz={rate_hz:.1f} (driven by camera arrivals)"
+                f"output='{output_topic}', sync_slop={sync_slop}s"
             )
 
         def _on_images(self, left_msg: "Image", right_msg: "Image") -> None:  # noqa: F821
@@ -302,15 +296,6 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         help="Vector3 publication topic (x=steer, y=throttle, z=0).",
     )
     parser.add_argument(
-        "--rate-hz",
-        type=float,
-        default=10.0,
-        help=(
-            "Informational publish rate; effective rate is driven by synced "
-            "camera arrivals (cameras run at 10 Hz per the URDF)."
-        ),
-    )
-    parser.add_argument(
         "--sync-slop-s",
         type=float,
         default=0.05,
@@ -342,7 +327,6 @@ def main(args: list[str] | None = None) -> None:
         rclpy.parameter.Parameter("left_topic", value=str(ns.left_topic)),
         rclpy.parameter.Parameter("right_topic", value=str(ns.right_topic)),
         rclpy.parameter.Parameter("output_topic", value=str(ns.output_topic)),
-        rclpy.parameter.Parameter("publish_rate_hz", value=float(ns.rate_hz)),
         rclpy.parameter.Parameter("sync_slop_s", value=float(ns.sync_slop_s)),
     ]
 
