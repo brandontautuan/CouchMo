@@ -88,3 +88,25 @@ def test_preprocess_deterministic() -> None:
     second = preprocess_pair(left, right)
 
     assert first.tobytes() == second.tobytes(), "preprocess_pair must be byte-deterministic"
+
+
+def test_preprocess_rejects_float_input() -> None:
+    import pytest
+
+    left = _make_frame(seed=0).astype(np.float32) / 255.0
+    right = _make_frame(seed=1)
+
+    with pytest.raises(ValueError, match="uint8"):
+        preprocess_pair(left, right)
+
+
+def test_framestacker_first_push_isolated_from_caller_mutation() -> None:
+    stacker = FrameStacker(num_frames=4)
+    pair = _make_uniform_pair(value=100)
+
+    stacker.push(pair)
+    pair[:] = 0
+    obs = stacker.push(_make_uniform_pair(value=200))
+
+    expected_kept = np.float32(100) / np.float32(255.0)
+    np.testing.assert_allclose(obs[2], np.full_like(obs[2], expected_kept))

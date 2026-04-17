@@ -26,6 +26,10 @@ def preprocess_pair(left_bgr: np.ndarray, right_bgr: np.ndarray) -> np.ndarray:
         raise ValueError(f"left_bgr must be HxWx3 BGR; got shape {left_bgr.shape}")
     if right_bgr.ndim != 3 or right_bgr.shape[2] != 3:
         raise ValueError(f"right_bgr must be HxWx3 BGR; got shape {right_bgr.shape}")
+    if left_bgr.dtype != np.uint8 or right_bgr.dtype != np.uint8:
+        raise ValueError(
+            f"inputs must be uint8 BGR; got {left_bgr.dtype}, {right_bgr.dtype}"
+        )
 
     h, w = FRAME_HW
     left_resized = cv2.resize(left_bgr, (w, h), interpolation=cv2.INTER_AREA)
@@ -53,6 +57,7 @@ class FrameStacker:
         self._buf: deque[np.ndarray] = deque(maxlen=num_frames)
 
     def reset(self) -> None:
+        """Drop all buffered frames; next push behaves as the first push."""
         self._buf.clear()
 
     def push(self, pair: np.ndarray) -> np.ndarray:
@@ -71,7 +76,7 @@ class FrameStacker:
 
         if not self._buf:
             for _ in range(self.num_frames):
-                self._buf.append(pair)
+                self._buf.append(pair.copy())
         else:
             self._buf.append(pair)
 
