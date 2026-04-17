@@ -35,6 +35,7 @@ from shared.preprocess import FrameStacker, preprocess_pair
 # Cam geometry mimics the real Brio 100 mounts (see autonomous_car_research.md).
 CAM_LATERAL_M: float = 0.35
 CAM_HEIGHT_M: float = 0.81
+CAM_FORWARD_M: float = 0.3      # forward offset from vehicle origin
 CAM_PITCH_DEG: float = -5.0     # mild downward tilt
 CAM_WIDTH: int = 256
 CAM_HEIGHT: int = 256
@@ -115,8 +116,8 @@ class CouchMoMetaDriveEnv(gym.Env):
         left_cam = engine.get_sensor("left_cam")
         right_cam = engine.get_sensor("right_cam")
         # MetaDrive cams parent to the vehicle; we set local position + HPR.
-        left_cam.get_cam().setPos(vehicle.origin, -CAM_LATERAL_M, 0.3, CAM_HEIGHT_M)
-        right_cam.get_cam().setPos(vehicle.origin, +CAM_LATERAL_M, 0.3, CAM_HEIGHT_M)
+        left_cam.get_cam().setPos(vehicle.origin, -CAM_LATERAL_M, CAM_FORWARD_M, CAM_HEIGHT_M)
+        right_cam.get_cam().setPos(vehicle.origin, +CAM_LATERAL_M, CAM_FORWARD_M, CAM_HEIGHT_M)
         left_cam.get_cam().setHpr(0, CAM_PITCH_DEG, 0)
         right_cam.get_cam().setHpr(0, CAM_PITCH_DEG, 0)
 
