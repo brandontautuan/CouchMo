@@ -35,6 +35,8 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
+BC_META_SCHEMA: str = "bc_meta/v1"
+
 
 # ---------------------------------------------------------------------------
 # Dataset loading
@@ -91,6 +93,11 @@ def load_dataset(data_root: Path) -> tuple[np.ndarray, np.ndarray]:
     if not all_obs:
         raise ValueError(f"No samples loaded from {data_root}.")
 
+    # TODO(scalability): load_dataset() materialises the full dataset in
+    # memory as one (N, 8, 84, 84) float32 array — ~226 KB/sample. At
+    # N >= ~50k samples this will exceed 10 GB RAM on typical laptops.
+    # Revisit with a streaming IterableDataset once real campus
+    # recordings exceed that volume.
     obs_arr = np.stack(all_obs, axis=0)          # (N, 8, 84, 84)
     targets_arr = np.stack(all_targets, axis=0)  # (N, 2)
     return obs_arr, targets_arr
@@ -294,7 +301,11 @@ def main(argv: list[str] | None = None) -> dict:
     }
 
     meta = {
-        "args": {k: str(v) for k, v in vars(args).items()},
+        "schema": BC_META_SCHEMA,
+        "args": {
+            k: (str(v) if isinstance(v, Path) else v)
+            for k, v in vars(args).items()
+        },
         "metrics": {
             "train_loss_history": train_loss_history,
             "val_loss_history": val_loss_history,

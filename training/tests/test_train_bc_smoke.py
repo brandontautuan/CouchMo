@@ -1,6 +1,6 @@
 """Smoke test: behavior cloning training on a tiny synthetic dataset.
 
-Generates 50 random samples packed into one shard + manifest, runs 2 epochs,
+Generates 50 random samples packed into one shard + manifest, runs 5 epochs,
 and asserts the training loss decreases.
 """
 from __future__ import annotations
@@ -61,7 +61,7 @@ def _write_manifest(tmp_path: Path) -> None:
 
 
 def test_bc_training_loss_decreases(tmp_path: Path) -> None:
-    """Train for 2 epochs on 50 synthetic samples; assert loss goes down."""
+    """Train for 5 epochs on 50 synthetic samples; assert loss goes down."""
     _make_synthetic_shard(tmp_path)
     _write_manifest(tmp_path)
 
