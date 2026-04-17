@@ -1,6 +1,7 @@
 """End-to-end smoke test for the MetaDrive pipeline."""
 from __future__ import annotations
 
+import math
 from pathlib import Path
 
 import pytest
@@ -49,17 +50,36 @@ def test_full_pipeline_smoke(tmp_path: Path):
         batch_size=32,
     )
     assert result["bc_transferred"], "BC transfer did not fire"
+    assert result["resumed_from"] is None, "unexpected resume on first run"
+
+    # 3b. Resume the run — second call against the same output_dir must pick
+    # up the latest checkpoint, not restart. This guards the cross-module
+    # checkpoint-discovery path that isolated unit tests can't fully cover.
+    resumed = train_ppo(
+        bc_ckpt=None,
+        output_dir=ppo_dir,
+        total_timesteps=96,
+        n_envs=1,
+        checkpoint_freq=64,
+        eval_freq=0,
+        n_steps=32,
+        batch_size=32,
+    )
+    assert resumed["resumed_from"] is not None, "resume path did not fire"
 
     # 4. Export final PPO checkpoint to ONNX.
     export(
-        pt_path=Path(result["final_path"]),
+        pt_path=Path(resumed["final_path"]),
         onnx_path=onnx_path,
         opset=17,
         verify=True,
         from_ppo=True,
     )
-    assert onnx_path.exists()
+    assert onnx_path.exists() and onnx_path.stat().st_size > 0
 
     # 5. Evaluate for 2 episodes (smoke).
     report = evaluate(onnx_path=onnx_path, episodes=2, max_steps=30)
     assert report["episodes"] == 2
+    assert math.isfinite(report["collision_rate"])
+    assert math.isfinite(report["off_road_rate"])
+    assert math.isfinite(report["mean_episode_length"])

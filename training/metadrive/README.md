@@ -21,6 +21,10 @@ pip install -r requirements.txt -r requirements-dev.txt -r requirements-rl.txt
 python -m pytest tests/test_metadrive_integration.py -v
 ```
 
+Requires the `requirements-rl.txt` deps (MetaDrive, SB3, ONNX Runtime).
+Without them the test skips cleanly — a `1 skipped` result does not mean
+the pipeline passed, only that it wasn't run.
+
 ## Colab flow
 
 Open `colab_runner.ipynb` in Colab and run cells top to bottom.
@@ -32,7 +36,7 @@ Open `colab_runner.ipynb` in Colab and run cells top to bottom.
 | `env.py` | Gym env wrapping `SafeMetaDriveEnv`; stereo cam obs + `(steer, throttle)` action. |
 | `expert_policy.py` | IDM expert adapter; produces actions in serial-protocol format. |
 | `collect_bc.py` | CLI: roll out expert, write shards via `shared.dataset_format`. |
-| `policy.py` | `CouchMoFeaturesExtractor` + `CouchMoActorCriticPolicy` (tanh+sigmoid action head for 1:1 BC weight transfer). |
+| `policy.py` | `CouchMoFeaturesExtractor` + `CouchMoActorCriticPolicy` (tanh+sigmoid action head for 1:1 BC weight transfer via `copy_bc_weights_into_policy`). |
 | `train_ppo.py` | SB3 PPO CLI with BC warm start, curriculum, resume from Drive. |
 | `eval_policy.py` | ONNX evaluation with R3 go/no-go thresholds; non-zero exit if thresholds fail. |
 | `colab_runner.ipynb` | Thin Colab orchestration. |
