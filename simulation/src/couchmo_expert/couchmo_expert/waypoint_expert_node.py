@@ -28,9 +28,18 @@ from __future__ import annotations
 import csv
 import math
 from pathlib import Path
-from typing import Any
+from typing import Final, TypedDict
 
 import numpy as np
+
+
+class PurePursuitInfo(TypedDict):
+    """Diagnostic payload returned alongside ``(steer, throttle)``."""
+
+    target_idx: int
+    lookahead_m: float
+    lateral_error_m: float
+    done: bool
 
 
 # ---------------------------------------------------------------------------
@@ -51,7 +60,7 @@ import numpy as np
 # left". But the IRL protocol defines positive steer as RIGHT. To bridge
 # the two conventions we negate: positive curvature (target-on-left) →
 # negative steer (full-left) as the IRL protocol expects.
-STEER_POS_DIR: float = -1.0
+STEER_POS_DIR: Final[float] = -1.0
 # ---------------------------------------------------------------------------
 
 
@@ -128,9 +137,14 @@ class PurePursuitExpert:
             raise ValueError(
                 f"lookahead_speed_cap_mps must be > 0; got {lookahead_speed_cap_mps}"
             )
-        if not 0.0 <= max_throttle <= 1.0:
+        if not 0.0 < max_throttle <= 1.0:
             raise ValueError(
-                f"max_throttle must be in [0, 1]; got {max_throttle}"
+                f"max_throttle must be in (0, 1]; got {max_throttle}"
+            )
+        if curvature_throttle_gain < 0.0:
+            raise ValueError(
+                f"curvature_throttle_gain must be >= 0; "
+                f"got {curvature_throttle_gain}"
             )
         if max_curvature_at_full_steer <= 0.0:
             raise ValueError(
@@ -202,10 +216,13 @@ class PurePursuitExpert:
         prev = self._waypoints[n - 2]
         seg = last - prev
         seg_norm = float(math.hypot(seg[0], seg[1]))
-        if seg_norm == 0.0:
-            return False
         disp_x = pose_xy[0] - last[0]
         disp_y = pose_xy[1] - last[1]
+        if seg_norm == 0.0:
+            # Degenerate final segment (duplicate final waypoint). Fall
+            # back to a small-distance test so a malformed CSV can still
+            # terminate the oracle.
+            return math.hypot(disp_x, disp_y) < 1e-6
         projection = (disp_x * seg[0] + disp_y * seg[1]) / seg_norm
         return projection > 0.0
 
@@ -215,7 +232,7 @@ class PurePursuitExpert:
         pose_xy: tuple[float, float],
         yaw_rad: float,
         speed_mps: float,
-    ) -> tuple[float, float, dict[str, Any]]:
+    ) -> tuple[float, float, PurePursuitInfo]:
         """Produce one ``(steer, throttle)`` command.
 
         Parameters
@@ -466,11 +483,27 @@ if ROS_AVAILABLE:
         def _on_tick(self) -> None:
             if not self._have_odom:
                 return
-            steer, throttle, info = self._expert.compute(
-                pose_xy=self._pose_xy,
-                yaw_rad=self._yaw_rad,
-                speed_mps=self._speed_mps,
-            )
+            try:
+                steer, throttle, info = self._expert.compute(
+                    pose_xy=self._pose_xy,
+                    yaw_rad=self._yaw_rad,
+                    speed_mps=self._speed_mps,
+                )
+            except Exception as exc:
+                # A compute() exception must not take down the timer
+                # callback silently. Log once per tick and publish a
+                # safe zero-throttle hold so downstream nodes see a
+                # deterministic value.
+                self.get_logger().error(
+                    f"waypoint_expert: compute() raised: {exc!r} — "
+                    "publishing zero throttle"
+                )
+                safe = Vector3()
+                safe.x = 0.0
+                safe.y = 0.0
+                safe.z = 0.0
+                self._pub.publish(safe)
+                return
             msg = Vector3()
             msg.x = float(steer)
             msg.y = float(throttle)
