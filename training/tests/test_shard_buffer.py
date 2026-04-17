@@ -55,10 +55,10 @@ def _add_sample(buf: ShardBuffer, t: float = 0.0, seed: int = 0) -> Path | None:
 # ---------------------------------------------------------------------------
 
 
-def test_invalid_samples_per_shard_raises() -> None:
+def test_invalid_samples_per_shard_raises(tmp_path: Path) -> None:
     """samples_per_shard < 1 should raise ValueError on construction."""
     with pytest.raises(ValueError, match="samples_per_shard must be >= 1"):
-        ShardBuffer("/tmp/ep_test", samples_per_shard=0)
+        ShardBuffer(tmp_path / "ep_test", samples_per_shard=0)
 
 
 # ---------------------------------------------------------------------------

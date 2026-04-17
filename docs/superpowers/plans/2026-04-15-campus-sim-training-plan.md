@@ -449,19 +449,19 @@
 - Create: `training/tests/test_action_adapter.py`
 - Modify: `simulation/src/couchmo_expert/setup.py` (entry point)
 
-- [ ] **Step 1: Real failing tests** (pure mapping, no ROS)
+- [x] **Step 1: Real failing tests** (pure mapping, no ROS)
   - `throttle=0` → `linear.x == 0`.
   - `steer=0, throttle>0` → `angular.z == 0`, `linear.x > 0`.
   - `steer>0, throttle>0` → `angular.z > 0` (matches IRL sign convention from `serial_controller.py` — verify against that file).
   - Mapping is monotonic in throttle and odd in steer.
 
-- [ ] **Step 2: Implement adapter** as plain function + thin `rclpy.Node` wrapper.
+- [x] **Step 2: Implement adapter** as plain function + thin `rclpy.Node` wrapper.
   - Subscribes `/expert/steer_throttle` (later: `/policy/steer_throttle`).
   - Publishes `/cmd_vel` at 10 Hz (latches latest input).
 
-- [ ] **Step 3: Run unit tests (expect pass).**
+- [x] **Step 3: Run unit tests (expect pass).**
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
   ```bash
   git add simulation/src/couchmo_expert/couchmo_expert/steer_throttle_to_cmd_vel.py training/tests/test_action_adapter.py simulation/src/couchmo_expert/setup.py
   git commit -m "sim: adapter mapping (steer, throttle) to cmd_vel at 10 Hz"
@@ -479,11 +479,11 @@
 
 **Container path:** writes to `/workspace/data/<episode_id>/shard_<n>.npz` — host-visible at `training/data/...` via the bind mount from Task 1.
 
-- [ ] **Step 1: Tests for `shared/dataset_format.py` round-trip**
+- [x] **Step 1: Tests for `shared/dataset_format.py` round-trip**
   - Write random shard → read → assert byte-equal arrays.
   - Manifest JSON round-trip preserves episode metadata.
 
-- [ ] **Step 2: Implement recorder node**
+- [x] **Step 2: Implement recorder node**
   - `message_filters.ApproximateTimeSynchronizer` over:
     - `/left_cam/image_raw`
     - `/right_cam/image_raw`
@@ -492,11 +492,11 @@
   - Writes via `shared.dataset_format.write_shard`.
   - Updates `manifest.json` per episode.
 
-- [ ] **Step 3: Smoke test (deferred verification)**
+- [x] **Step 3: Smoke test (deferred verification)**
   - User runs sim + recorder for one short episode; confirms `training/data/<id>/` populated.
   - Subagent verifies code and round-trip tests only.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
   ```bash
   git add simulation/src/couchmo_expert/couchmo_expert/dataset_recorder_node.py simulation/src/couchmo_expert/launch/record_dataset.launch.py training/tests/test_dataset_format.py simulation/src/couchmo_expert/setup.py
   git commit -m "sim: dataset recorder writes shared .npz shards via bind-mounted volume"
@@ -511,24 +511,24 @@
 - Create: `training/imitation/train_bc.py`
 - Create: `training/imitation/__init__.py`
 
-- [ ] **Step 1: Define the policy network** in `model.py`
+- [x] **Step 1: Define the policy network** in `model.py`
   - Input: `(8, 84, 84) float32` (matches `shared.preprocess`).
   - Small CNN (think Atari-DQN-ish): 3 conv layers + 2 FC.
   - Output: `(steer, throttle)`. Steer via `tanh`, throttle via `sigmoid`.
   - **Constraint:** must export to ONNX cleanly and run on CPU at < 50 ms per inference.
 
-- [ ] **Step 2: Training loop** in `train_bc.py`
+- [x] **Step 2: Training loop** in `train_bc.py`
   - CLI: `--data-root ./data --epochs N --batch-size N --device cpu|cuda --out ./checkpoints/bc.pt`.
   - Default `--data-root` is `./data` (matches Task 1 bind mount).
   - Dataset reader uses `shared.dataset_format`.
   - Train/val split, MSE loss on `(steer, throttle)`, basic metrics (steer MAE, throttle MAE).
   - Saves `bc.pt` checkpoint + `bc_meta.json` (config, metrics).
 
-- [ ] **Step 3: Smoke test on tiny synthetic dataset**
+- [x] **Step 3: Smoke test on tiny synthetic dataset**
   - Generate 50 random samples in test fixture form.
   - Run 1 epoch, assert loss decreases.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
   ```bash
   git add training/imitation/model.py training/imitation/train_bc.py training/imitation/__init__.py
   git commit -m "train: behavior cloning loop (native, no ROS) with shared preprocess"
@@ -542,15 +542,15 @@
 - Create: `training/imitation/export_onnx.py`
 - Create: `training/tests/test_onnx_export.py`
 
-- [ ] **Step 1: Export script**
+- [x] **Step 1: Export script**
   - Loads a `.pt` checkpoint, runs `torch.onnx.export(model, dummy_input, path, opset_version=17, dynamic_axes={'input': {0: 'batch'}})`.
   - Validates with `onnx.checker.check_model`.
   - Writes `model.onnx` next to `model.pt`.
 
-- [ ] **Step 2: Equivalence test**
+- [x] **Step 2: Equivalence test**
   - `test_onnx_export.py`: train a 1-step model, export, run same input through both Torch and ONNX Runtime, assert max abs diff < 1e-4.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
   ```bash
   git add training/imitation/export_onnx.py training/tests/test_onnx_export.py
   git commit -m "train: ONNX export with numerical-equivalence test against Torch"
@@ -563,7 +563,7 @@
 **Files:**
 - Create: `training/imitation/eval_in_sim.py`
 
-- [ ] **Step 1: Implement**
+- [x] **Step 1: Implement**
   - At top of file:
     ```python
     try:
@@ -576,10 +576,10 @@
   - If invoked without ROS, print clear message and exit 0 (not 1).
   - Loads `.onnx` (preferred) or `.pt`, subscribes camera topics, publishes `/policy/steer_throttle`.
 
-- [ ] **Step 2: Verify import gate**
+- [x] **Step 2: Verify import gate**
   - On bare Windows desktop without ROS installed, `python -m training.imitation.eval_in_sim --help` prints help and exits cleanly.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
   ```bash
   git add training/imitation/eval_in_sim.py
   git commit -m "train: in-sim eval node with optional ROS import gate"
@@ -621,21 +621,21 @@
 - Create: `runtime/tests/test_inference_smoke.py`
 - Create: `runtime/tests/test_replay.py`
 
-- [ ] **Step 1: `runtime/inference.py`**
+- [x] **Step 1: `runtime/inference.py`**
   - `class Policy: __init__(onnx_path); predict(stacked_frames) -> (steer, throttle)`.
   - Uses `onnxruntime.InferenceSession` with CPU provider only.
   - Imports and uses `shared.preprocess.FrameStacker` so preprocessing is identical to training.
 
-- [ ] **Step 2: `runtime/camera.py`**
+- [x] **Step 2: `runtime/camera.py`**
   - `DualCamera(left_index, right_index)` with `.read() -> (left_bgr, right_bgr)`.
   - Cross-platform: OpenCV `VideoCapture` works the same on Win/Mac/Linux.
   - Discovers indices via small `list_cameras()` helper.
 
-- [ ] **Step 3: `runtime/control.py`**
+- [x] **Step 3: `runtime/control.py`**
   - Wraps `serial_controller.py`. Accepts port string (`COM3` on Windows, `/dev/tty.usbserial-XXXX` on Mac, `/dev/ttyUSB0` on Linux).
   - Single method: `send(steer, throttle)`.
 
-- [ ] **Step 4: `runtime/drive.py` main**
+- [x] **Step 4: `runtime/drive.py` main**
   - CLI:
     ```
     python -m runtime.drive --source live  --left-cam 0 --right-cam 1 --port COM3 --model model.onnx --rate 10
@@ -646,18 +646,18 @@
   - `--source replay`: reads `.npz` episode (via `shared.dataset_format`), feeds frames through Policy, prints predicted vs recorded actions side-by-side. **No serial sent in replay mode.**
   - Graceful shutdown on Ctrl-C (zero throttle final command in live mode).
 
-- [ ] **Step 5: Tests**
+- [x] **Step 5: Tests**
   - `test_inference_smoke.py`: load a tiny ONNX model (or generate one in fixture), feed random input, assert outputs in correct ranges.
   - `test_replay.py`: run `--source replay` against a 10-frame fixture episode; assert it completes and prints comparable actions.
 
-- [ ] **Step 6: `runtime/README.md`**
+- [x] **Step 6: `runtime/README.md`**
   - Windows install (PowerShell venv, `pip install -r runtime/requirements.txt`).
   - Mac install (bash venv).
   - COM port discovery on each OS.
   - Camera index discovery.
   - One-liner sanity command: `python -m runtime.drive --source replay --episode samples/tiny_episode.npz --model checkpoints/bc.onnx`.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
   ```bash
   git add runtime/
   git commit -m "runtime: on-laptop inference loop (ONNX, OpenCV, pyserial) with replay mode"
