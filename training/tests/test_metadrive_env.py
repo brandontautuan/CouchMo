@@ -135,3 +135,43 @@ def test_truncation_at_max_episode_steps(monkeypatch):
         )
     finally:
         env.close()
+
+
+def test_two_resets_produce_different_camera_jitter():
+    """Reset jitter (camera pose, steering gain) should diverge across seeds."""
+    from training.metadrive.env import CouchMoMetaDriveEnv
+
+    env = CouchMoMetaDriveEnv(config={"num_scenarios": 10, "randomize": True})
+    try:
+        env.reset(seed=0)
+        gain_0 = env._steering_gain
+        env.reset(seed=1)
+        gain_1 = env._steering_gain
+        assert gain_0 != gain_1, "steering gain should differ across resets"
+    finally:
+        env.close()
+
+
+def test_brightness_scale_bounded():
+    from training.metadrive.env import CouchMoMetaDriveEnv
+
+    env = CouchMoMetaDriveEnv(config={"num_scenarios": 10, "randomize": True})
+    try:
+        for seed in range(5):
+            env.reset(seed=seed)
+            assert 0.7 <= env._brightness_scale <= 1.3
+    finally:
+        env.close()
+
+
+def test_randomization_off_by_default():
+    """Without the 'randomize' flag, steering gain is 1.0 and brightness is 1.0."""
+    from training.metadrive.env import CouchMoMetaDriveEnv
+
+    env = CouchMoMetaDriveEnv(config={"num_scenarios": 5})
+    try:
+        env.reset(seed=0)
+        assert env._steering_gain == 1.0
+        assert env._brightness_scale == 1.0
+    finally:
+        env.close()

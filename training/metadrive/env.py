@@ -50,6 +50,16 @@ W_IDLE: float = 0.05
 IDLE_VEL_THRESHOLD: float = 0.1     # m/s
 MAX_EPISODE_STEPS: int = 500
 
+# Domain randomization ranges (see spec §Domain randomization).
+STEER_GAIN_RANGE: tuple[float, float] = (0.85, 1.15)
+BRIGHTNESS_RANGE: tuple[float, float] = (0.7, 1.3)
+CAM_PITCH_JITTER_DEG: float = 3.0
+CAM_LATERAL_JITTER_M: float = 0.02
+EGO_LATERAL_OFFSET_M: float = 0.3
+EGO_HEADING_OFFSET_DEG: float = 5.0
+CAM_NOISE_STD: float = 3.0          # uint8 pixel units
+ACTION_DELAY_PROB: float = 0.1
+
 
 class CouchMoMetaDriveEnv(gym.Env):
     """Gym env that wraps SafeMetaDriveEnv with stereo cams + CouchMo action space."""
@@ -83,6 +93,14 @@ class CouchMoMetaDriveEnv(gym.Env):
         self._prev_action: np.ndarray = np.zeros(2, dtype=np.float32)
         self._prev_pos: np.ndarray | None = None
         self._step_count: int = 0
+        self._randomize: bool = bool(cfg.get("randomize", False))
+        self._rng = np.random.default_rng(0)
+
+        # Randomization state — reset per episode.
+        self._steering_gain: float = 1.0
+        self._brightness_scale: float = 1.0
+        self._cam_pitch_offsets = (0.0, 0.0)   # (left_deg, right_deg)
+        self._cam_lateral_offsets = (0.0, 0.0) # (left_m, right_m)
 
         self.observation_space = spaces.Box(
             low=0.0, high=1.0, shape=(8, 84, 84), dtype=np.float32
@@ -98,8 +116,12 @@ class CouchMoMetaDriveEnv(gym.Env):
     # ------------------------------------------------------------------
 
     def reset(self, *, seed: int | None = None, options: dict | None = None):
+        if seed is not None:
+            self._rng = np.random.default_rng(seed)
+
         md_obs, md_info = self._md_env.reset(seed=seed)
         self._stacker.reset()
+        self._sample_episode_randomization()
         self._attach_cameras_to_ego()
         self._prev_action = np.zeros(2, dtype=np.float32)
         self._prev_pos = self._current_xy()
@@ -130,20 +152,20 @@ class CouchMoMetaDriveEnv(gym.Env):
     # ------------------------------------------------------------------
 
     def _attach_cameras_to_ego(self) -> None:
-        """Position the two RGB cameras at armrest offsets on the ego vehicle.
-
-        MetaDrive's sensor system ties cameras to the ego after reset. This is
-        called once per reset; later tasks will add per-reset jitter here.
-        """
         engine = self._md_env.engine
         vehicle = engine.agent_manager.active_agents["default_agent"]
         left_cam = engine.get_sensor("left_cam")
         right_cam = engine.get_sensor("right_cam")
-        # MetaDrive cams parent to the vehicle; we set local position + HPR.
-        left_cam.get_cam().setPos(vehicle.origin, -CAM_LATERAL_M, CAM_FORWARD_M, CAM_HEIGHT_M)
-        right_cam.get_cam().setPos(vehicle.origin, +CAM_LATERAL_M, CAM_FORWARD_M, CAM_HEIGHT_M)
-        left_cam.get_cam().setHpr(0, CAM_PITCH_DEG, 0)
-        right_cam.get_cam().setHpr(0, CAM_PITCH_DEG, 0)
+
+        left_pitch = CAM_PITCH_DEG + self._cam_pitch_offsets[0]
+        right_pitch = CAM_PITCH_DEG + self._cam_pitch_offsets[1]
+        left_lat = -CAM_LATERAL_M + self._cam_lateral_offsets[0]
+        right_lat = +CAM_LATERAL_M + self._cam_lateral_offsets[1]
+
+        left_cam.get_cam().setPos(vehicle.origin, left_lat, CAM_FORWARD_M, CAM_HEIGHT_M)
+        right_cam.get_cam().setPos(vehicle.origin, right_lat, CAM_FORWARD_M, CAM_HEIGHT_M)
+        left_cam.get_cam().setHpr(0, left_pitch, 0)
+        right_cam.get_cam().setHpr(0, right_pitch, 0)
 
     def _read_camera_rgb(self, name: str) -> np.ndarray:
         """Read a MetaDrive RGBCamera and return a (H, W, 3) uint8 BGR array.
@@ -158,10 +180,10 @@ class CouchMoMetaDriveEnv(gym.Env):
         return u8[:, :, ::-1].copy()
 
     def _build_observation(self) -> np.ndarray:
-        left_bgr = self._read_camera_rgb("left_cam")
-        right_bgr = self._read_camera_rgb("right_cam")
-        pair = preprocess_pair(left_bgr, right_bgr)  # (2, 84, 84) uint8
-        return self._stacker.push(pair)              # (8, 84, 84) float32
+        left_bgr = self._apply_visual_randomization(self._read_camera_rgb("left_cam"))
+        right_bgr = self._apply_visual_randomization(self._read_camera_rgb("right_cam"))
+        pair = preprocess_pair(left_bgr, right_bgr)
+        return self._stacker.push(pair)
 
     def _current_xy(self) -> np.ndarray:
         vehicle = self._md_env.engine.agent_manager.active_agents["default_agent"]
@@ -211,13 +233,46 @@ class CouchMoMetaDriveEnv(gym.Env):
 
         return reward, terminated
 
-    def _to_metadrive_action(self, action: np.ndarray) -> np.ndarray:
-        """Convert policy action [steer, throttle] -> MetaDrive [steering, throttle_brake].
+    def _sample_episode_randomization(self) -> None:
+        if not self._randomize:
+            self._steering_gain = 1.0
+            self._brightness_scale = 1.0
+            self._cam_pitch_offsets = (0.0, 0.0)
+            self._cam_lateral_offsets = (0.0, 0.0)
+            return
 
-        steer is passthrough. throttle >= 0 means no brake; we pass throttle
-        directly to MetaDrive's throttle_brake (which also accepts negative
-        values for braking, which we never use).
-        """
+        self._steering_gain = float(self._rng.uniform(*STEER_GAIN_RANGE))
+        self._brightness_scale = float(self._rng.uniform(*BRIGHTNESS_RANGE))
+        self._cam_pitch_offsets = (
+            float(self._rng.uniform(-CAM_PITCH_JITTER_DEG, CAM_PITCH_JITTER_DEG)),
+            float(self._rng.uniform(-CAM_PITCH_JITTER_DEG, CAM_PITCH_JITTER_DEG)),
+        )
+        self._cam_lateral_offsets = (
+            float(self._rng.uniform(-CAM_LATERAL_JITTER_M, CAM_LATERAL_JITTER_M)),
+            float(self._rng.uniform(-CAM_LATERAL_JITTER_M, CAM_LATERAL_JITTER_M)),
+        )
+
+    def _apply_visual_randomization(self, bgr: np.ndarray) -> np.ndarray:
+        """Apply brightness scale + Gaussian noise to a uint8 BGR frame."""
+        if not self._randomize:
+            return bgr
+        scaled = bgr.astype(np.float32) * self._brightness_scale
+        noise = self._rng.normal(0.0, CAM_NOISE_STD, size=bgr.shape).astype(np.float32)
+        noisy = np.clip(scaled + noise, 0.0, 255.0)
+        return noisy.astype(np.uint8)
+
+    def _to_metadrive_action(self, action: np.ndarray) -> np.ndarray:
         steer = float(np.clip(action[0], -1.0, 1.0))
         throttle = float(np.clip(action[1], 0.0, 1.0))
+
+        if self._randomize:
+            # Steering gain (bridges skid-steer dynamics gap).
+            steer *= self._steering_gain
+            steer = float(np.clip(steer, -1.0, 1.0))
+
+            # Action delay — occasionally re-apply previous action.
+            if self._rng.random() < ACTION_DELAY_PROB:
+                steer = float(self._prev_action[0]) * self._steering_gain
+                throttle = float(self._prev_action[1])
+
         return np.array([steer, throttle], dtype=np.float32)
