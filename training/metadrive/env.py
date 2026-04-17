@@ -250,6 +250,15 @@ class CouchMoMetaDriveEnv(gym.Env):
             float(self._rng.uniform(-CAM_LATERAL_JITTER_M, CAM_LATERAL_JITTER_M)),
         )
 
+    def _update_scenario_config(self, traffic_density: float, accident_prob: float) -> None:
+        """Called by the curriculum callback to adjust scenario difficulty mid-run.
+
+        The new values take effect on the next env.reset() — SafeMetaDriveEnv
+        consumes its config dict on reset.
+        """
+        self._md_env.config["traffic_density"] = float(traffic_density)
+        self._md_env.config["accident_prob"] = float(accident_prob)
+
     def _apply_visual_randomization(self, bgr: np.ndarray) -> np.ndarray:
         """Apply brightness scale + Gaussian noise to a uint8 BGR frame."""
         if not self._randomize:
