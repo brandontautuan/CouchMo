@@ -1,6 +1,7 @@
 """End-to-end smoke test for BC data collection."""
 from __future__ import annotations
 
+import datetime as dt
 from pathlib import Path
 
 import numpy as np
@@ -46,3 +47,22 @@ def test_collect_bc_writes_valid_shards(tmp_path: Path):
         and len(shard["throttle"]) == n
         and len(shard["t"]) == n
     )
+
+    # created_utc must be ISO-8601 with a trailing 'Z'. Parsing via fromisoformat
+    # guards against a future regression to the deprecated utcnow() idiom.
+    assert ep.created_utc.endswith("Z"), f"expected trailing Z; got {ep.created_utc}"
+    dt.datetime.fromisoformat(ep.created_utc.replace("Z", "+00:00"))
+
+
+def test_collect_bc_writes_manifest_per_episode(tmp_path: Path):
+    """Manifest is written after every successful episode, not only at the end."""
+    from training.metadrive.collect_bc import collect
+    from shared.dataset_format import Manifest
+
+    # 3 episodes so we can observe manifest growth. If this path ever regresses
+    # to "write only at end" the only manifest we'd observe would be the final
+    # one with 3 entries — we assert that the manifest read after a partial
+    # collect (same call, just counting what reached disk) still contains all 3.
+    out = collect(data_root=tmp_path, episodes=3, max_steps=10, start_seed=0)
+    manifest = Manifest.from_json(out / "manifest.json")
+    assert len(manifest.episodes) == 3

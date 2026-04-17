@@ -105,16 +105,19 @@ def collect(
                 EpisodeMeta(
                     id=ep_id,
                     n_samples=len(lefts),
-                    created_utc=_dt.datetime.utcnow().isoformat() + "Z",
+                    created_utc=_dt.datetime.now(_dt.timezone.utc).isoformat().replace("+00:00", "Z"),
                     shard_path=shard_rel,
                     world="metadrive_safe",
                     notes=f"seed={seed}",
                 )
             )
 
-            log.info("Episode %d/%d (seed=%d) -> %d samples", ep_idx + 1, episodes, seed, len(lefts))
+            # Write the manifest after every successful episode so a crash
+            # mid-run doesn't discard all progress. Manifest.to_json overwrites
+            # in full, so the prior file is preserved if this write itself fails.
+            manifest.to_json(data_root / "manifest.json")
 
-        manifest.to_json(data_root / "manifest.json")
+            log.info("Episode %d/%d (seed=%d) -> %d samples", ep_idx + 1, episodes, seed, len(lefts))
     finally:
         env.close()
 
