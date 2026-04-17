@@ -24,3 +24,7 @@ training/checkpoints/
 # Model artifacts
 *.onnx
 *.pt
+
+# Local demo outputs and env symlinks
+*.mp4
+/py39
