@@ -75,6 +75,7 @@ class CouchMoMetaDriveEnv(gym.Env):
             "use_render": False,
             "manual_control": False,
             "decision_repeat": DECISION_REPEAT,
+            "image_observation": True,
             "sensors": {
                 "left_cam": (RGBCamera, CAM_WIDTH, CAM_HEIGHT),
                 "right_cam": (RGBCamera, CAM_WIDTH, CAM_HEIGHT),
