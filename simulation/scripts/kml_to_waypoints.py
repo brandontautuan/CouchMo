@@ -63,9 +63,9 @@ def _read_kml_bytes(path: Path) -> bytes:
 def _iter_linestring_elements(root: ET.Element):
     """Yield every ``<LineString>`` element regardless of namespace.
 
-    Real Google Earth exports always carry the KML 2.2 default namespace,
-    but hand-authored fixtures sometimes omit it. Matching on the local
-    tag name keeps us tolerant to both forms.
+    Matches on the local tag name so KML 2.2, KML 2.3, and no-namespace
+    hand-authored fixtures all parse. Real Google Earth 7.x exports
+    sometimes drift between 2.2 and 2.3, and we want both to work.
     """
     for elem in root.iter():
         tag = elem.tag
@@ -92,7 +92,10 @@ def _parse_coordinate_block(text: str) -> list[tuple[float, float, float]]:
     for token in text.split():
         parts = token.split(",")
         if len(parts) < 2:
-            continue
+            raise ValueError(
+                f"KML <coordinates> token {token!r} has fewer than 2 "
+                f"comma-separated fields; expected 'lon,lat[,alt]'"
+            )
         lon = float(parts[0])
         lat = float(parts[1])
         alt = float(parts[2]) if len(parts) >= 3 and parts[2] != "" else 0.0
@@ -161,6 +164,41 @@ def latlon_to_enu(
     return (x_east, y_north)
 
 
+def _triples_to_enu_rows(
+    triples: list[tuple[float, float, float]],
+    *,
+    origin_lat: float,
+    origin_lon: float,
+) -> list[tuple[float, float, float]]:
+    """Project parsed (lon, lat, alt) triples to (x_m, y_m, s_m) rows.
+
+    Consecutive duplicate coordinates (which would contribute a
+    zero-length segment) are dropped so the cumulative arc-length
+    ``s_m`` is strictly monotonically increasing after the first
+    waypoint. Pure projection — no I/O.
+    """
+    rows: list[tuple[float, float, float]] = []
+    prev_xy: tuple[float, float] | None = None
+    cumulative = 0.0
+    for lon, lat, _alt in triples:
+        x, y = latlon_to_enu(
+            lat, lon, origin_lat=origin_lat, origin_lon=origin_lon
+        )
+        if prev_xy is None:
+            rows.append((x, y, 0.0))
+            prev_xy = (x, y)
+            continue
+        dx = x - prev_xy[0]
+        dy = y - prev_xy[1]
+        step = math.hypot(dx, dy)
+        if step == 0.0:
+            continue
+        cumulative += step
+        rows.append((x, y, cumulative))
+        prev_xy = (x, y)
+    return rows
+
+
 def convert(
     kml_path: Path,
     *,
@@ -188,26 +226,9 @@ def convert(
         One row per waypoint: ``(x_m_east, y_m_north, s_m_cumulative)``.
     """
     triples = parse_kml(kml_path)
-    rows: list[tuple[float, float, float]] = []
-    prev_xy: tuple[float, float] | None = None
-    cumulative = 0.0
-    for lon, lat, _alt in triples:
-        x, y = latlon_to_enu(
-            lat, lon, origin_lat=origin_lat, origin_lon=origin_lon
-        )
-        if prev_xy is None:
-            rows.append((x, y, 0.0))
-            prev_xy = (x, y)
-            continue
-        dx = x - prev_xy[0]
-        dy = y - prev_xy[1]
-        step = math.hypot(dx, dy)
-        if step == 0.0:
-            continue
-        cumulative += step
-        rows.append((x, y, cumulative))
-        prev_xy = (x, y)
-    return rows
+    return _triples_to_enu_rows(
+        triples, origin_lat=origin_lat, origin_lon=origin_lon
+    )
 
 
 def _write_csv(rows: list[tuple[float, float, float]], out_path: Path) -> None:
@@ -262,13 +283,18 @@ def main(argv: list[str] | None = None) -> int:
     in_path: Path = args.in_path
     out_path: Path = args.out_path
 
+    triples = parse_kml(in_path)
+    if not triples:
+        print(
+            f"error: {in_path} produced 0 waypoints — no <LineString> with "
+            f"<coordinates> found (check your Google Earth export)",
+            file=sys.stderr,
+        )
+        return 2
+
     origin_lat = args.origin_lat
     origin_lon = args.origin_lon
     if origin_lat is None or origin_lon is None:
-        triples = parse_kml(in_path)
-        if not triples:
-            print(f"error: no coordinates found in {in_path}", file=sys.stderr)
-            return 2
         first_lon, first_lat, _ = triples[0]
         if origin_lat is None:
             origin_lat = first_lat
@@ -280,7 +306,9 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
 
-    rows = convert(in_path, origin_lat=origin_lat, origin_lon=origin_lon)
+    rows = _triples_to_enu_rows(
+        triples, origin_lat=origin_lat, origin_lon=origin_lon
+    )
     _write_csv(rows, out_path)
     print(
         f"kml_to_waypoints: wrote {len(rows)} waypoints to {out_path}",

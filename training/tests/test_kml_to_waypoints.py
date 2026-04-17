@@ -126,18 +126,72 @@ def test_arc_length_monotonic() -> None:
     assert s_values[-1] > 0.0
 
 
+def test_malformed_coordinate_token_raises(tmp_path) -> None:
+    bad_kml = tmp_path / "bad.kml"
+    bad_kml.write_text(
+        """<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2"><Document><Placemark>
+<LineString><coordinates>-120.0</coordinates></LineString>
+</Placemark></Document></kml>""",
+        encoding="utf-8",
+    )
+    try:
+        kml_to_waypoints.parse_kml(bad_kml)
+    except ValueError as exc:
+        assert "comma-separated" in str(exc), f"unexpected error message: {exc}"
+    else:
+        raise AssertionError(
+            "parse_kml must raise ValueError on a token with no comma"
+        )
+
+
+def test_main_exits_2_on_kml_with_no_linestring(tmp_path, capsys) -> None:
+    empty_kml = tmp_path / "empty.kml"
+    empty_kml.write_text(
+        """<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2"><Document>
+<Placemark><Point><coordinates>-120.0,37.0,0</coordinates></Point></Placemark>
+</Document></kml>""",
+        encoding="utf-8",
+    )
+    out_csv = tmp_path / "out.csv"
+
+    rc = kml_to_waypoints.main(
+        ["--in", str(empty_kml), "--out", str(out_csv)]
+    )
+
+    assert rc == 2
+    captured = capsys.readouterr()
+    assert "0 waypoints" in captured.err
+    assert not out_csv.exists(), "no CSV should be written when input is empty"
+
+
 if __name__ == "__main__":
-    # Direct-exec fallback for hosts without pytest installed. Useful on
-    # the Windows dev box where the training venv may not yet be set up.
-    tests = [
+    import io
+    import tempfile
+
+    class _CapsysShim:
+        """Minimal capsys substitute for direct-exec test runs."""
+        def __init__(self) -> None:
+            self.out = io.StringIO()
+            self.err = io.StringIO()
+
+        def readouterr(self):
+            return type("X", (), {"out": self.out.getvalue(), "err": self.err.getvalue()})
+
+    direct_tests = [
         test_latlon_to_enu_zero_origin,
         test_latlon_to_enu_known_offset,
         test_parse_linestring,
         test_parse_kmz,
         test_arc_length_monotonic,
     ]
+    tmp_tests = [
+        test_malformed_coordinate_token_raises,
+        test_main_exits_2_on_kml_with_no_linestring,
+    ]
     failed = 0
-    for fn in tests:
+    for fn in direct_tests:
         try:
             fn()
         except Exception as exc:
@@ -145,5 +199,25 @@ if __name__ == "__main__":
             print(f"FAIL {fn.__name__}: {exc}")
         else:
             print(f"PASS {fn.__name__}")
+    for fn in tmp_tests:
+        with tempfile.TemporaryDirectory() as td:
+            tmp_path = Path(td)
+            try:
+                if fn.__code__.co_argcount == 1:
+                    fn(tmp_path)
+                else:
+                    capsys = _CapsysShim()
+                    import sys as _sys
+                    real_stdout, real_stderr = _sys.stdout, _sys.stderr
+                    _sys.stdout, _sys.stderr = capsys.out, capsys.err
+                    try:
+                        fn(tmp_path, capsys)
+                    finally:
+                        _sys.stdout, _sys.stderr = real_stdout, real_stderr
+            except Exception as exc:
+                failed += 1
+                print(f"FAIL {fn.__name__}: {exc}")
+            else:
+                print(f"PASS {fn.__name__}")
     if failed:
         raise SystemExit(1)
