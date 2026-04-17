@@ -109,10 +109,11 @@ class CouchMoMetaDriveEnv(gym.Env):
 
     def step(self, action: np.ndarray):
         md_action = self._to_metadrive_action(action)
+        # MetaDrive's native reward is discarded; we emit our own shaped reward below.
         _, _md_reward, md_terminated, md_truncated, info = self._md_env.step(md_action)
 
         self._step_count += 1
-        reward, terminated = self._compute_reward_and_termination(action, info)
+        reward, terminated = self._compute_reward_and_termination(action)
         truncated = md_truncated or self._step_count >= MAX_EPISODE_STEPS
 
         self._prev_action = action.astype(np.float32, copy=True)
@@ -171,7 +172,7 @@ class CouchMoMetaDriveEnv(gym.Env):
         vehicle = self._md_env.engine.agent_manager.active_agents["default_agent"]
         return float(vehicle.speed)  # m/s
 
-    def _is_collision(self, info: dict) -> bool:
+    def _is_collision(self) -> bool:
         vehicle = self._md_env.engine.agent_manager.active_agents["default_agent"]
         return bool(
             getattr(vehicle, "crash_vehicle", False)
@@ -179,35 +180,32 @@ class CouchMoMetaDriveEnv(gym.Env):
             or getattr(vehicle, "crash_sidewalk", False)
         )
 
-    def _is_off_road(self, info: dict) -> bool:
+    def _is_off_road(self) -> bool:
         vehicle = self._md_env.engine.agent_manager.active_agents["default_agent"]
         return bool(getattr(vehicle, "out_of_road", False))
 
     def _compute_reward_and_termination(
-        self, action: np.ndarray, info: dict
+        self, action: np.ndarray
     ) -> tuple[float, bool]:
-        reward = 0.0
+        # _prev_pos is always seeded by reset(), so no None-guard is needed:
+        # calling step() before reset() is a gym API violation and should fail loud.
+        reward = W_PROGRESS * float(np.linalg.norm(self._current_xy() - self._prev_pos))
 
-        # Progress along road (approximated by forward XY distance delta).
-        cur_pos = self._current_xy()
-        if self._prev_pos is not None:
-            progress = float(np.linalg.norm(cur_pos - self._prev_pos))
-            reward += W_PROGRESS * progress
-
-        # Action smoothness (quadratic penalty on action delta).
+        # Action smoothness (quadratic penalty on action delta from previous step).
         delta = action.astype(np.float32) - self._prev_action
         reward -= W_SMOOTH * float(np.dot(delta, delta))
 
-        # Idle penalty (stopped but commanded to move? still penalize).
+        # Idle penalty: always fire when speed is below the idle threshold —
+        # the agent must learn to keep moving.
         if self._current_speed() < IDLE_VEL_THRESHOLD:
             reward -= W_IDLE
 
-        # Terminal rewards.
+        # Terminal rewards. Collision is strictly worse than off-road, so it wins.
         terminated = False
-        if self._is_collision(info):
+        if self._is_collision():
             reward -= W_COLLISION
             terminated = True
-        elif self._is_off_road(info):
+        elif self._is_off_road():
             reward -= W_OFF_ROAD
             terminated = True
 

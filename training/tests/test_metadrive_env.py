@@ -79,42 +79,59 @@ def test_reward_is_finite_on_normal_step():
         env.close()
 
 
-def test_reward_penalizes_idle_when_stopped():
-    """Idle penalty should fire when velocity stays near zero."""
-    from training.metadrive.env import CouchMoMetaDriveEnv
+def test_reward_penalizes_idle_when_stopped(monkeypatch):
+    """Idle penalty path fires when _current_speed < IDLE_VEL_THRESHOLD.
+
+    Isolates the idle branch by stubbing _current_speed to force the
+    below-threshold path, so the assertion cannot pass for other reasons
+    (progress, smoothness, or MetaDrive vehicle dynamics).
+    """
+    from training.metadrive.env import CouchMoMetaDriveEnv, W_IDLE
 
     env = CouchMoMetaDriveEnv(config={"num_scenarios": 5})
     try:
         env.reset(seed=0)
-        # Zero throttle -> vehicle should stay near zero velocity.
-        rewards = []
-        for _ in range(5):
-            _, r, term, trunc, _ = env.step(np.array([0.0, 0.0], dtype=np.float32))
-            rewards.append(r)
-            if term or trunc:
-                break
-        # At least one reward should include a negative idle penalty.
-        assert min(rewards) < 0, f"expected an idle-penalty step; got {rewards}"
+        # Force the idle branch to fire deterministically.
+        monkeypatch.setattr(env, "_current_speed", lambda: 0.0)
+        # Zero action against zero _prev_action → no smoothness penalty.
+        # _prev_pos is re-seeded to _current_xy() *after* reward calc, so
+        # over two steps the progress term is at most one physics-step of
+        # drift — typically zero when we command zero throttle.
+        action = np.array([0.0, 0.0], dtype=np.float32)
+        _, r, _, _, _ = env.step(action)
+        # Reward for this step must include -W_IDLE. Progress and smoothness
+        # contributions are non-negative and near-zero respectively for this
+        # input, so r ≤ -W_IDLE + epsilon.
+        assert r <= -W_IDLE + 1e-3, (
+            f"expected reward ≤ -W_IDLE (~{-W_IDLE:.3f}); got {r:.4f}"
+        )
     finally:
         env.close()
 
 
-def test_truncation_at_max_steps():
+def test_truncation_at_max_episode_steps(monkeypatch):
+    """MAX_EPISODE_STEPS branch fires independently of MetaDrive's horizon."""
+    from training.metadrive import env as env_module
     from training.metadrive.env import CouchMoMetaDriveEnv
 
-    env = CouchMoMetaDriveEnv(
-        config={"num_scenarios": 5, "horizon": 5}
-    )
+    # Shrink MAX_EPISODE_STEPS to 3 so we can hit it in seconds.
+    # MetaDrive horizon is left at its default (much larger) so md_truncated
+    # cannot fire first — we're guarding our own cap.
+    monkeypatch.setattr(env_module, "MAX_EPISODE_STEPS", 3)
+
+    env = CouchMoMetaDriveEnv(config={"num_scenarios": 5})
     try:
         env.reset(seed=0)
-        truncated = False
-        for _ in range(20):
+        truncated_at = None
+        for i in range(1, 10):
             _, _, term, trunc, _ = env.step(np.array([0.0, 0.3], dtype=np.float32))
             if trunc:
-                truncated = True
+                truncated_at = i
                 break
             if term:
                 break
-        assert truncated or term, "expected termination or truncation within 20 steps"
+        assert truncated_at == 3, (
+            f"expected truncation at step 3 (MAX_EPISODE_STEPS); got {truncated_at}"
+        )
     finally:
         env.close()
