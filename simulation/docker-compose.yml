@@ -1,7 +1,7 @@
 # Couchmo simulation stack
-# Requires: XQuartz running on macOS (see README / run.sh)
-# Usage: ./run.sh   (first time)
-#        docker compose up sim   (subsequent runs)
+# UI is served via noVNC at http://localhost:6081/vnc.html — no X server needed.
+# Usage: ./run.sh sim   (macOS/Linux)
+#        .\run.ps1 sim  (Windows)
 
 services:
 
@@ -15,6 +15,8 @@ services:
       - ROS_DOMAIN_ID=42
     ports:
       - "6081:6080"   # browser: http://localhost:6081/vnc.html
+    volumes:
+      - ../training/data:/workspace/data
     stdin_open: true
     tty: true
 
@@ -28,6 +30,19 @@ services:
       - ROS_DOMAIN_ID=42
     ports:
       - "6080:6080"
+    stdin_open: true
+    tty: true
+
+  # ── Headless sim: no noVNC port, for batch dataset gen ──
+  sim_headless:
+    build:
+      context: .
+      dockerfile: Dockerfile.sim
+    container_name: couchmo_sim_headless
+    environment:
+      - ROS_DOMAIN_ID=42
+    volumes:
+      - ../training/data:/workspace/data
     stdin_open: true
     tty: true
 
