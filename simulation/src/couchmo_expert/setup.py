@@ -27,6 +27,7 @@ setup(
         "console_scripts": [
             "waypoint_expert_node = couchmo_expert.waypoint_expert_node:main",
             "steer_throttle_to_cmd_vel = couchmo_expert.steer_throttle_to_cmd_vel:main",
+            "dataset_recorder_node = couchmo_expert.dataset_recorder_node:main",
         ],
     },
 )
