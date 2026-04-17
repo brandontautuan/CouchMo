@@ -85,9 +85,9 @@ def test_mapping_monotonic_in_throttle() -> None:
     throttle_values = [0.0, 0.1, 0.25, 0.5, 0.75, 1.0]
     for thr in throttle_values:
         linear_x, _ = steer_throttle_to_twist(steer=0.0, throttle=thr)
-        assert linear_x >= previous_lx, (
-            f"expected monotonic increase: linear_x={linear_x} "
-            f"not >= previous={previous_lx} at throttle={thr}"
+        assert linear_x > previous_lx, (
+            f"expected strict increase: linear_x={linear_x} "
+            f"not > previous={previous_lx} at throttle={thr}"
         )
         previous_lx = linear_x
 
