@@ -25,11 +25,44 @@ _H = 84
 _W = 84
 
 
+def _load_model_from_ppo(zip_path: Path) -> tuple[BCPolicy, int]:
+    """Load an SB3 PPO zip and return (BCPolicy with PPO weights copied in, in_channels).
+
+    Layer mapping (see training.metadrive.policy):
+        features_extractor.conv1  -> BCPolicy.conv1
+        features_extractor.conv2  -> BCPolicy.conv2
+        features_extractor.conv3  -> BCPolicy.conv3
+        features_extractor.fc1    -> BCPolicy.fc1
+        action_net                -> BCPolicy.fc2
+    """
+    try:
+        from stable_baselines3 import PPO
+    except ImportError as exc:
+        raise ImportError(
+            "stable-baselines3 is required for --from-ppo; "
+            "pip install -r training/requirements-rl.txt"
+        ) from exc
+
+    ppo = PPO.load(str(zip_path))
+    extractor = ppo.policy.features_extractor
+    in_channels = int(extractor.conv1.in_channels)
+
+    model = BCPolicy(in_channels=in_channels)
+    model.conv1.load_state_dict(extractor.conv1.state_dict())
+    model.conv2.load_state_dict(extractor.conv2.state_dict())
+    model.conv3.load_state_dict(extractor.conv3.state_dict())
+    model.fc1.load_state_dict(extractor.fc1.state_dict())
+    model.fc2.load_state_dict(ppo.policy.action_net.state_dict())
+    model.eval()
+    return model, in_channels
+
+
 def export(
     pt_path: Path,
     onnx_path: Path | None = None,
     opset: int = 17,
     verify: bool = False,
+    from_ppo: bool = False,
 ) -> Path:
     """Export a Task-8a BCPolicy checkpoint to ONNX and validate it.
 
@@ -42,6 +75,11 @@ def export(
                    input through Torch and ONNX Runtime; asserts max abs diff
                    < 1e-4).  Prints PASS/FAIL and raises ``RuntimeError`` on
                    failure.
+        from_ppo:  If *True*, interpret ``pt_path`` as a stable-baselines3 PPO
+                   ``.zip`` produced by ``training.metadrive.train_ppo``. The
+                   custom policy's features_extractor (conv1/conv2/conv3/fc1)
+                   and action_net are copied into a fresh BCPolicy, which is
+                   what gets exported. Skips the bc_meta sibling check.
 
     Returns:
         The path to the written ``.onnx`` file.
@@ -65,33 +103,35 @@ def export(
     # ------------------------------------------------------------------
     # Load checkpoint — Task-8a format: {"state_dict": ..., "arch": ...}
     # ------------------------------------------------------------------
-    # Optionally validate bc_meta sibling as a sanity check.
-    meta_path = pt_path.with_name(pt_path.stem + "_meta.json")
-    if meta_path.exists():
-        import json
-        meta = json.loads(meta_path.read_text(encoding="utf-8"))
-        schema = meta.get("schema", "")
-        if schema != BC_META_SCHEMA:
+    if from_ppo:
+        model, in_channels = _load_model_from_ppo(pt_path)
+    else:
+        # Optionally validate bc_meta sibling as a sanity check.
+        meta_path = pt_path.with_name(pt_path.stem + "_meta.json")
+        if meta_path.exists():
+            import json
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+            schema = meta.get("schema", "")
+            if schema != BC_META_SCHEMA:
+                raise ValueError(
+                    f"Sibling meta file {meta_path} has unexpected schema "
+                    f"'{schema}'; expected '{BC_META_SCHEMA}'. Is this a Task-8a checkpoint?"
+                )
+
+        ckpt = torch.load(str(pt_path), weights_only=True)
+
+        if not isinstance(ckpt, dict) or "state_dict" not in ckpt or "arch" not in ckpt:
             raise ValueError(
-                f"Sibling meta file {meta_path} has unexpected schema "
-                f"'{schema}'; expected '{BC_META_SCHEMA}'. Is this a Task-8a checkpoint?"
+                "Checkpoint format not recognized; expected Task-8a format "
+                "{'state_dict': ..., 'arch': {'in_channels': int}}. "
+                f"Got type={type(ckpt).__name__}, keys={list(ckpt.keys()) if isinstance(ckpt, dict) else 'N/A'}"
             )
 
-    ckpt = torch.load(str(pt_path), weights_only=True)
-
-    if not isinstance(ckpt, dict) or "state_dict" not in ckpt or "arch" not in ckpt:
-        raise ValueError(
-            "Checkpoint format not recognized; expected Task-8a format "
-            "{'state_dict': ..., 'arch': {'in_channels': int}}. "
-            f"Got type={type(ckpt).__name__}, keys={list(ckpt.keys()) if isinstance(ckpt, dict) else 'N/A'}"
-        )
-
-    arch = ckpt["arch"]
-    model = BCPolicy(**arch)
-    model.load_state_dict(ckpt["state_dict"])
-    model.eval()
-
-    in_channels = arch.get("in_channels", _IN_CHANNELS)
+        arch = ckpt["arch"]
+        model = BCPolicy(**arch)
+        model.load_state_dict(ckpt["state_dict"])
+        model.eval()
+        in_channels = arch.get("in_channels", _IN_CHANNELS)
 
     # ------------------------------------------------------------------
     # ONNX export — legacy tracing exporter (NOT dynamo_export)
@@ -187,6 +227,11 @@ def main(argv: list[str] | None = None) -> None:
         action="store_true",
         help="Run numerical equivalence check (Torch vs ONNX Runtime) after export.",
     )
+    parser.add_argument(
+        "--from-ppo",
+        action="store_true",
+        help="Interpret --in as an SB3 PPO .zip checkpoint instead of a Task-8a .pt.",
+    )
 
     args = parser.parse_args(argv)
 
@@ -196,6 +241,7 @@ def main(argv: list[str] | None = None) -> None:
             onnx_path=args.onnx_path,
             opset=args.opset,
             verify=args.verify,
+            from_ppo=args.from_ppo,
         )
         print(f"Exported → {out}")
     except (FileNotFoundError, ValueError) as exc:
