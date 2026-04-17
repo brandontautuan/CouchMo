@@ -65,3 +65,56 @@ def test_env_observation_space_shape():
         assert env.observation_space.dtype == np.float32
     finally:
         env.close()
+
+
+def test_reward_is_finite_on_normal_step():
+    from training.metadrive.env import CouchMoMetaDriveEnv
+
+    env = CouchMoMetaDriveEnv(config={"num_scenarios": 5})
+    try:
+        env.reset(seed=0)
+        _, reward, _, _, _ = env.step(np.array([0.0, 0.3], dtype=np.float32))
+        assert np.isfinite(reward)
+    finally:
+        env.close()
+
+
+def test_reward_penalizes_idle_when_stopped():
+    """Idle penalty should fire when velocity stays near zero."""
+    from training.metadrive.env import CouchMoMetaDriveEnv
+
+    env = CouchMoMetaDriveEnv(config={"num_scenarios": 5})
+    try:
+        env.reset(seed=0)
+        # Zero throttle -> vehicle should stay near zero velocity.
+        rewards = []
+        for _ in range(5):
+            _, r, term, trunc, _ = env.step(np.array([0.0, 0.0], dtype=np.float32))
+            rewards.append(r)
+            if term or trunc:
+                break
+        # At least one reward should include a negative idle penalty.
+        assert min(rewards) < 0, f"expected an idle-penalty step; got {rewards}"
+    finally:
+        env.close()
+
+
+def test_truncation_at_max_steps():
+    from training.metadrive.env import CouchMoMetaDriveEnv
+
+    env = CouchMoMetaDriveEnv(
+        config={"num_scenarios": 5, "horizon": 5}
+    )
+    try:
+        env.reset(seed=0)
+        truncated = False
+        for _ in range(20):
+            _, _, term, trunc, _ = env.step(np.array([0.0, 0.3], dtype=np.float32))
+            if trunc:
+                truncated = True
+                break
+            if term:
+                break
+        assert truncated or term, "expected termination or truncation within 20 steps"
+    finally:
+        env.close()

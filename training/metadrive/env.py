@@ -41,6 +41,15 @@ CAM_WIDTH: int = 256
 CAM_HEIGHT: int = 256
 DECISION_REPEAT: int = 10       # MetaDrive physics @ 100 Hz; policy @ 10 Hz
 
+# Reward weights (see spec §Reward).
+W_PROGRESS: float = 1.0
+W_COLLISION: float = 50.0
+W_OFF_ROAD: float = 20.0
+W_SMOOTH: float = 0.1
+W_IDLE: float = 0.05
+IDLE_VEL_THRESHOLD: float = 0.1     # m/s
+MAX_EPISODE_STEPS: int = 500
+
 
 class CouchMoMetaDriveEnv(gym.Env):
     """Gym env that wraps SafeMetaDriveEnv with stereo cams + CouchMo action space."""
@@ -71,6 +80,9 @@ class CouchMoMetaDriveEnv(gym.Env):
 
         self._md_env = SafeMetaDriveEnv(cfg)
         self._stacker = FrameStacker(num_frames=4)
+        self._prev_action: np.ndarray = np.zeros(2, dtype=np.float32)
+        self._prev_pos: np.ndarray | None = None
+        self._step_count: int = 0
 
         self.observation_space = spaces.Box(
             low=0.0, high=1.0, shape=(8, 84, 84), dtype=np.float32
@@ -89,14 +101,25 @@ class CouchMoMetaDriveEnv(gym.Env):
         md_obs, md_info = self._md_env.reset(seed=seed)
         self._stacker.reset()
         self._attach_cameras_to_ego()
+        self._prev_action = np.zeros(2, dtype=np.float32)
+        self._prev_pos = self._current_xy()
+        self._step_count = 0
         obs = self._build_observation()
         return obs, dict(md_info)
 
     def step(self, action: np.ndarray):
         md_action = self._to_metadrive_action(action)
-        _, reward, terminated, truncated, info = self._md_env.step(md_action)
+        _, _md_reward, md_terminated, md_truncated, info = self._md_env.step(md_action)
+
+        self._step_count += 1
+        reward, terminated = self._compute_reward_and_termination(action, info)
+        truncated = md_truncated or self._step_count >= MAX_EPISODE_STEPS
+
+        self._prev_action = action.astype(np.float32, copy=True)
+        self._prev_pos = self._current_xy()
+
         obs = self._build_observation()
-        return obs, float(reward), bool(terminated), bool(truncated), dict(info)
+        return obs, float(reward), bool(terminated or md_terminated), bool(truncated), dict(info)
 
     def close(self) -> None:
         self._md_env.close()
@@ -138,6 +161,57 @@ class CouchMoMetaDriveEnv(gym.Env):
         right_bgr = self._read_camera_rgb("right_cam")
         pair = preprocess_pair(left_bgr, right_bgr)  # (2, 84, 84) uint8
         return self._stacker.push(pair)              # (8, 84, 84) float32
+
+    def _current_xy(self) -> np.ndarray:
+        vehicle = self._md_env.engine.agent_manager.active_agents["default_agent"]
+        pos = vehicle.position  # (x, y)
+        return np.array([pos[0], pos[1]], dtype=np.float32)
+
+    def _current_speed(self) -> float:
+        vehicle = self._md_env.engine.agent_manager.active_agents["default_agent"]
+        return float(vehicle.speed)  # m/s
+
+    def _is_collision(self, info: dict) -> bool:
+        vehicle = self._md_env.engine.agent_manager.active_agents["default_agent"]
+        return bool(
+            getattr(vehicle, "crash_vehicle", False)
+            or getattr(vehicle, "crash_object", False)
+            or getattr(vehicle, "crash_sidewalk", False)
+        )
+
+    def _is_off_road(self, info: dict) -> bool:
+        vehicle = self._md_env.engine.agent_manager.active_agents["default_agent"]
+        return bool(getattr(vehicle, "out_of_road", False))
+
+    def _compute_reward_and_termination(
+        self, action: np.ndarray, info: dict
+    ) -> tuple[float, bool]:
+        reward = 0.0
+
+        # Progress along road (approximated by forward XY distance delta).
+        cur_pos = self._current_xy()
+        if self._prev_pos is not None:
+            progress = float(np.linalg.norm(cur_pos - self._prev_pos))
+            reward += W_PROGRESS * progress
+
+        # Action smoothness (quadratic penalty on action delta).
+        delta = action.astype(np.float32) - self._prev_action
+        reward -= W_SMOOTH * float(np.dot(delta, delta))
+
+        # Idle penalty (stopped but commanded to move? still penalize).
+        if self._current_speed() < IDLE_VEL_THRESHOLD:
+            reward -= W_IDLE
+
+        # Terminal rewards.
+        terminated = False
+        if self._is_collision(info):
+            reward -= W_COLLISION
+            terminated = True
+        elif self._is_off_road(info):
+            reward -= W_OFF_ROAD
+            terminated = True
+
+        return reward, terminated
 
     def _to_metadrive_action(self, action: np.ndarray) -> np.ndarray:
         """Convert policy action [steer, throttle] -> MetaDrive [steering, throttle_brake].
