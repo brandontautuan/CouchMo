@@ -91,82 +91,100 @@ def train(
     output_dir.mkdir(parents=True, exist_ok=True)
 
     vec_cls = DummyVecEnv if n_envs == 1 else SubprocVecEnv
-    train_env = vec_cls([_make_env_factory(randomize=True) for _ in range(n_envs)])
+    # Vary start_seed per worker so parallel rollouts see disjoint scenario slices.
+    train_env = vec_cls(
+        [_make_env_factory(randomize=True, scenario_start=i * 2000) for i in range(n_envs)]
+    )
+    eval_env = None
 
-    resumed_from: Path | None = _latest_checkpoint(output_dir)
+    try:
+        resumed_from: Path | None = _latest_checkpoint(output_dir)
 
-    if resumed_from is not None:
-        log.info("Resuming from %s", resumed_from)
-        model = PPO.load(str(resumed_from), env=train_env)
-        bc_transferred: list[str] = []
-    else:
-        model = PPO(
-            CouchMoActorCriticPolicy,
-            train_env,
-            learning_rate=learning_rate,
-            n_steps=n_steps,
-            batch_size=batch_size,
-            n_epochs=10,
-            gamma=0.99,
-            gae_lambda=0.95,
-            clip_range=0.2,
-            tensorboard_log=str(output_dir / "tb"),
-            verbose=1,
-        )
-        bc_transferred = []
-        if bc_ckpt is not None:
-            ckpt = torch.load(str(bc_ckpt), weights_only=True)
-            bc = BCPolicy(**ckpt["arch"])
-            bc.load_state_dict(ckpt["state_dict"])
-            bc_transferred = copy_bc_weights_into_policy(bc, model.policy)
-            log.info("BC weights transferred: %s", bc_transferred)
-
-    callbacks: list[BaseCallback] = []
-
-    if checkpoint_freq > 0:
-        callbacks.append(
-            CheckpointCallback(
-                save_freq=max(1, checkpoint_freq // max(1, n_envs)),
-                save_path=str(output_dir),
-                name_prefix="checkpoint",
+        if resumed_from is not None:
+            log.info("Resuming from %s", resumed_from)
+            if bc_ckpt is not None:
+                log.warning(
+                    "Ignoring --bc-ckpt because resuming from %s (weights already learned)",
+                    resumed_from,
+                )
+            model = PPO.load(str(resumed_from), env=train_env)
+            bc_transferred: list[str] = []
+        else:
+            model = PPO(
+                CouchMoActorCriticPolicy,
+                train_env,
+                learning_rate=learning_rate,
+                n_steps=n_steps,
+                batch_size=batch_size,
+                n_epochs=10,
+                gamma=0.99,
+                gae_lambda=0.95,
+                clip_range=0.2,
+                tensorboard_log=str(output_dir / "tb"),
+                verbose=1,
             )
-        )
+            bc_transferred = []
+            if bc_ckpt is not None:
+                ckpt = torch.load(str(bc_ckpt), weights_only=True)
+                bc = BCPolicy(**ckpt["arch"])
+                bc.load_state_dict(ckpt["state_dict"])
+                bc_transferred = copy_bc_weights_into_policy(bc, model.policy)
+                log.info("BC weights transferred: %s", bc_transferred)
 
-    if eval_freq > 0:
-        eval_env = DummyVecEnv([_make_env_factory(randomize=False, scenario_start=10_000)])
-        callbacks.append(
-            EvalCallback(
-                eval_env,
-                best_model_save_path=str(output_dir),
-                eval_freq=max(1, eval_freq // max(1, n_envs)),
-                n_eval_episodes=eval_episodes,
-                deterministic=True,
-                render=False,
-                log_path=str(output_dir),
+        callbacks: list[BaseCallback] = []
+
+        if checkpoint_freq > 0:
+            callbacks.append(
+                CheckpointCallback(
+                    save_freq=max(1, checkpoint_freq // max(1, n_envs)),
+                    save_path=str(output_dir),
+                    name_prefix="checkpoint",
+                )
             )
-        )
 
-    callbacks.append(CurriculumCallback(train_env))
+        if eval_freq > 0:
+            eval_env = DummyVecEnv([_make_env_factory(randomize=False, scenario_start=10_000)])
+            callbacks.append(
+                EvalCallback(
+                    eval_env,
+                    best_model_save_path=str(output_dir),
+                    eval_freq=max(1, eval_freq // max(1, n_envs)),
+                    n_eval_episodes=eval_episodes,
+                    deterministic=True,
+                    render=False,
+                    log_path=str(output_dir),
+                )
+            )
 
-    remaining = total_timesteps - int(model.num_timesteps)
-    if remaining > 0:
-        model.learn(
-            total_timesteps=remaining,
-            callback=CallbackList(callbacks),
-            reset_num_timesteps=False,
-        )
+        callbacks.append(CurriculumCallback(train_env))
 
-    final = output_dir / "final.zip"
-    model.save(str(final))
+        remaining = total_timesteps - int(model.num_timesteps)
+        if remaining > 0:
+            model.learn(
+                total_timesteps=remaining,
+                callback=CallbackList(callbacks),
+                reset_num_timesteps=False,
+            )
+        else:
+            log.info(
+                "Already at %d / %d timesteps; skipping learn()",
+                int(model.num_timesteps),
+                total_timesteps,
+            )
 
-    train_env.close()
+        final = output_dir / "final.zip"
+        model.save(str(final))
 
-    return {
-        "num_timesteps": int(model.num_timesteps),
-        "resumed_from": str(resumed_from) if resumed_from else None,
-        "bc_transferred": bc_transferred,
-        "final_path": str(final),
-    }
+        return {
+            "num_timesteps": int(model.num_timesteps),
+            "resumed_from": str(resumed_from) if resumed_from else None,
+            "bc_transferred": bc_transferred,
+            "final_path": str(final),
+        }
+    finally:
+        train_env.close()
+        if eval_env is not None:
+            eval_env.close()
 
 
 class CurriculumCallback:

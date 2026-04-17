@@ -53,7 +53,9 @@ def test_train_ppo_writes_checkpoint_and_resumes(tmp_path: Path):
 
 
 def test_train_ppo_with_bc_init(tmp_path: Path):
-    """Verify BC checkpoint init produces a policy that predicts finite actions."""
+    """Smoke-test BC warm start. Deep weight-transfer equivalence is covered by
+    test_bc_weight_transfer_matches_bc_forward in test_metadrive_policy.py;
+    this test only verifies the train() wrapper wires the transfer through."""
     from training.imitation.model import BCPolicy
     from training.metadrive.train_ppo import train
 
