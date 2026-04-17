@@ -175,3 +175,57 @@ def test_randomization_off_by_default():
         assert env._brightness_scale == 1.0
     finally:
         env.close()
+
+
+def test_visual_randomization_respects_uint8_bounds():
+    """With randomize=True, _apply_visual_randomization stays in [0,255] uint8
+    and actually modifies the input (brightness scale + noise are non-trivial)."""
+    from training.metadrive.env import CouchMoMetaDriveEnv
+
+    env = CouchMoMetaDriveEnv(config={"num_scenarios": 5, "randomize": True})
+    try:
+        env.reset(seed=0)
+        fake = np.full((16, 16, 3), 128, dtype=np.uint8)
+        out = env._apply_visual_randomization(fake)
+        assert out.shape == fake.shape
+        assert out.dtype == np.uint8
+        assert out.min() >= 0 and out.max() <= 255
+        assert not np.array_equal(out, fake), (
+            "expected randomized output to differ from input"
+        )
+    finally:
+        env.close()
+
+
+def test_visual_randomization_is_identity_when_disabled():
+    """Without randomize, _apply_visual_randomization returns the input unchanged."""
+    from training.metadrive.env import CouchMoMetaDriveEnv
+
+    env = CouchMoMetaDriveEnv(config={"num_scenarios": 5})
+    try:
+        env.reset(seed=0)
+        fake = np.full((16, 16, 3), 200, dtype=np.uint8)
+        out = env._apply_visual_randomization(fake)
+        assert np.array_equal(out, fake), "expected identity when randomize=False"
+    finally:
+        env.close()
+
+
+def test_action_delay_branch_stays_clipped(monkeypatch):
+    """Even when action-delay replays prev_action at max steer with max gain,
+    the emitted MetaDrive action stays within [-1, 1]."""
+    from training.metadrive.env import CouchMoMetaDriveEnv
+
+    env = CouchMoMetaDriveEnv(config={"num_scenarios": 5, "randomize": True})
+    try:
+        env.reset(seed=0)
+        # Force worst case: gain = upper bound, prev steer = full lock.
+        env._steering_gain = 1.15
+        env._prev_action = np.array([1.0, 0.5], dtype=np.float32)
+        # Force the action-delay branch to fire deterministically.
+        monkeypatch.setattr(env._rng, "random", lambda: 0.0)
+        out = env._to_metadrive_action(np.array([1.0, 0.5], dtype=np.float32))
+        assert -1.0 <= out[0] <= 1.0, f"steer {out[0]} exceeded [-1,1]"
+        assert 0.0 <= out[1] <= 1.0, f"throttle {out[1]} exceeded [0,1]"
+    finally:
+        env.close()

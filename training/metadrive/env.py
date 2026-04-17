@@ -55,8 +55,6 @@ STEER_GAIN_RANGE: tuple[float, float] = (0.85, 1.15)
 BRIGHTNESS_RANGE: tuple[float, float] = (0.7, 1.3)
 CAM_PITCH_JITTER_DEG: float = 3.0
 CAM_LATERAL_JITTER_M: float = 0.02
-EGO_LATERAL_OFFSET_M: float = 0.3
-EGO_HEADING_OFFSET_DEG: float = 5.0
 CAM_NOISE_STD: float = 3.0          # uint8 pixel units
 ACTION_DELAY_PROB: float = 0.1
 
@@ -268,11 +266,17 @@ class CouchMoMetaDriveEnv(gym.Env):
         if self._randomize:
             # Steering gain (bridges skid-steer dynamics gap).
             steer *= self._steering_gain
-            steer = float(np.clip(steer, -1.0, 1.0))
 
-            # Action delay — occasionally re-apply previous action.
+            # Action delay — occasionally re-apply the previous raw policy
+            # command (with the current episode's gain). Replaying the raw
+            # command, not the previously-sent post-gain value, keeps
+            # action-delay and steering-gain as independent randomization
+            # knobs rather than compounding gain across repeats.
             if self._rng.random() < ACTION_DELAY_PROB:
                 steer = float(self._prev_action[0]) * self._steering_gain
                 throttle = float(self._prev_action[1])
+
+            # Single clip covers both the gain-only and action-delay branches.
+            steer = float(np.clip(steer, -1.0, 1.0))
 
         return np.array([steer, throttle], dtype=np.float32)
