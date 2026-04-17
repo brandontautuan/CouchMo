@@ -60,3 +60,15 @@ training/checkpoints/
 
 Both `data/` and `checkpoints/` are gitignored. Pass any other root with
 `--data-root <path>` and the scripts will use it unchanged.
+
+## MetaDrive RL pipeline
+
+The `training/metadrive/` subpackage adds a sibling RL pipeline (BC pretrain +
+PPO fine-tune in MetaDrive). It reuses this package's `BCPolicy`, `train_bc.py`,
+and `export_onnx.py` as-is. Heavy deps live in `requirements-rl.txt`:
+
+```bash
+pip install -r requirements-rl.txt
+```
+
+See `training/metadrive/README.md` for the full flow.

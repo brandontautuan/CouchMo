@@ -1,0 +1,9 @@
+# Heavy deps for the MetaDrive RL pipeline. Kept separate from requirements.txt
+# so the core training env (imitation + ONNX export) stays lightweight.
+#
+# Install:   pip install -r training/requirements-rl.txt
+# (You still need training/requirements.txt for the shared bits.)
+
+metadrive-simulator>=0.4.2.3
+stable-baselines3[extra]>=2.3.0
+gymnasium>=0.29
