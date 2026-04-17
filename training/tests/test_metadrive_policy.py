@@ -3,10 +3,14 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-import torch
 
+# importorskip must fire before `import torch` so this file collects cleanly
+# on machines where torch (a heavy RL dep) is absent.
+pytest.importorskip("torch")
 pytest.importorskip("stable_baselines3")
 pytest.importorskip("gymnasium")
+
+import torch  # noqa: E402 — intentional post-importorskip import
 
 
 def test_features_extractor_output_shape():
