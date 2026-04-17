@@ -3,7 +3,7 @@ from glob import glob
 
 from setuptools import setup
 
-package_name = "couchmo_nav"
+package_name = "couchmo_expert"
 
 setup(
     name=package_name,
@@ -15,13 +15,12 @@ setup(
         (str(Path("share") / package_name), ["package.xml"]),
         (str(Path("share") / package_name / "launch"), glob("launch/*.py")),
         (str(Path("share") / package_name / "config"), glob("config/*.yaml")),
-        (str(Path("share") / package_name / "maps"), glob("maps/*.yaml")),
     ],
     install_requires=["setuptools"],
     zip_safe=True,
     maintainer="CouchMo Maintainer",
     maintainer_email="couchmo@example.com",
-    description="CouchMo navigation, training data capture, and runtime inference nodes.",
+    description="CouchMo learned-policy support nodes: waypoint expert, action adapter, dataset recorder.",
     license="MIT",
     tests_require=["pytest"],
     entry_points={

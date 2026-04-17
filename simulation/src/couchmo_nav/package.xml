@@ -1,28 +1,14 @@
 <?xml version="1.0"?>
-<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
   <name>couchmo_nav</name>
-  <version>0.0.1</version>
-  <description>CouchMo navigation, training data capture, and runtime inference nodes.</description>
-
-  <maintainer email="couchmo@example.com">CouchMo Maintainer</maintainer>
-  <author email="couchmo@example.com">CouchMo Maintainer</author>
+  <version>0.1.0</version>
+  <description>Nav2 configuration and navigation launch for Couchmo</description>
+  <maintainer email="you@example.com">Couchmo Team</maintainer>
   <license>MIT</license>
-
-  <buildtool_depend>ament_python</buildtool_depend>
-
-  <depend>rclpy</depend>
-  <depend>sensor_msgs</depend>
-  <depend>geometry_msgs</depend>
-  <depend>std_msgs</depend>
-  <depend>cv_bridge</depend>
-
-  <test_depend>ament_copyright</test_depend>
-  <test_depend>ament_flake8</test_depend>
-  <test_depend>ament_pep257</test_depend>
-  <test_depend>python3-pytest</test_depend>
-
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <exec_depend>nav2_bringup</exec_depend>
+  <exec_depend>slam_toolbox</exec_depend>
   <export>
-    <build_type>ament_python</build_type>
+    <build_type>ament_cmake</build_type>
   </export>
 </package>

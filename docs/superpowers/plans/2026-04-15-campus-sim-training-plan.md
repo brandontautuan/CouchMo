@@ -50,17 +50,17 @@
 - `simulation/scripts/kml_to_waypoints.py` — parse KML/KMZ → local ENU waypoints.
 - `simulation/scripts/generate_campus_world.py` — generate hybrid SDF world from waypoints.
 - `simulation/scripts/fixtures/synthetic_campus.kml` — 3-segment fake KML so Tasks 3 & 4 can run before real campus KML exists.
-- `simulation/src/couchmo_nav/package.xml` — ROS 2 Python package manifest.
-- `simulation/src/couchmo_nav/setup.py` — ament_python setup.
-- `simulation/src/couchmo_nav/setup.cfg` — entry-point bindings.
-- `simulation/src/couchmo_nav/resource/couchmo_nav` — ament resource marker.
-- `simulation/src/couchmo_nav/couchmo_nav/__init__.py`
-- `simulation/src/couchmo_nav/couchmo_nav/waypoint_expert_node.py` — pure-pursuit expert @10 Hz.
-- `simulation/src/couchmo_nav/couchmo_nav/steer_throttle_to_cmd_vel.py` — adapter node.
-- `simulation/src/couchmo_nav/couchmo_nav/dataset_recorder_node.py` — writes `.npz` shards.
-- `simulation/src/couchmo_nav/launch/waypoint_expert.launch.py`
-- `simulation/src/couchmo_nav/launch/record_dataset.launch.py`
-- `simulation/src/couchmo_nav/config/waypoint_follower.yaml`
+- `simulation/src/couchmo_expert/package.xml` — ROS 2 Python package manifest.
+- `simulation/src/couchmo_expert/setup.py` — ament_python setup.
+- `simulation/src/couchmo_expert/setup.cfg` — entry-point bindings.
+- `simulation/src/couchmo_expert/resource/couchmo_expert` — ament resource marker.
+- `simulation/src/couchmo_expert/couchmo_expert/__init__.py`
+- `simulation/src/couchmo_expert/couchmo_expert/waypoint_expert_node.py` — pure-pursuit expert @10 Hz.
+- `simulation/src/couchmo_expert/couchmo_expert/steer_throttle_to_cmd_vel.py` — adapter node.
+- `simulation/src/couchmo_expert/couchmo_expert/dataset_recorder_node.py` — writes `.npz` shards.
+- `simulation/src/couchmo_expert/launch/waypoint_expert.launch.py`
+- `simulation/src/couchmo_expert/launch/record_dataset.launch.py`
+- `simulation/src/couchmo_expert/config/waypoint_follower.yaml`
 
 **Create (new — `shared/`, used by both training and runtime):**
 - `shared/__init__.py`
@@ -102,11 +102,13 @@
 
 ## Task 0: Cross-platform scaffolding (prereqs)
 
-**Why this exists:** Tasks 2–9 in earlier drafts assumed the `couchmo_nav` ROS package, the `training/` Python project, and the `shared/` preprocessing module already existed. They don't. This task creates them so later tasks can focus on logic, not boilerplate.
+**Why this exists:** Tasks 2–9 in earlier drafts assumed the `couchmo_expert` ROS package, the `training/` Python project, and the `shared/` preprocessing module already existed. They don't. This task creates them so later tasks can focus on logic, not boilerplate.
+
+**Note on existing packages:** The repo already contains an `ament_cmake` package `couchmo_nav` holding Nav2 configuration (`config/nav2_params.yaml`) and maps. **Do not modify it.** The new learned-policy nodes go in a separate `ament_python` package called `couchmo_expert`. `couchmo_bringup` continues to consume `couchmo_nav` for Nav2; `couchmo_expert` is independent.
 
 **Files:**
 - Create: `.gitattributes`, `.gitignore` updates
-- Create: `simulation/src/couchmo_nav/{package.xml, setup.py, setup.cfg, resource/couchmo_nav, couchmo_nav/__init__.py, launch/, config/}`
+- Create: `simulation/src/couchmo_expert/{package.xml, setup.py, setup.cfg, resource/couchmo_expert, couchmo_expert/__init__.py, launch/, config/}`
 - Create: `shared/{__init__.py, preprocess.py, dataset_format.py}`
 - Create: `training/{pyproject.toml, requirements.txt, requirements-dev.txt, conftest.py, README.md, tests/__init__.py}`
 - Create: `runtime/{requirements.txt, README.md, __init__.py, tests/__init__.py}`
@@ -131,11 +133,11 @@
     ```
   - Add to `.gitignore`: `training/data/`, `training/checkpoints/`, `**/__pycache__/`, `*.onnx`, `*.pt`, `.pytest_cache/`, `.venv/`.
 
-- [ ] **Step 3: `couchmo_nav` ROS 2 package skeleton**
+- [ ] **Step 3: `couchmo_expert` ROS 2 package skeleton**
   - `package.xml` with `<buildtool_depend>ament_python</buildtool_depend>`, deps on `rclpy`, `sensor_msgs`, `geometry_msgs`, `std_msgs`, `cv_bridge`.
   - `setup.py` declares the package, glob-installs `launch/*.py` and `config/*.yaml`, registers entry points (filled in later tasks).
-  - Create empty `couchmo_nav/__init__.py`, `launch/`, `config/` dirs.
-  - Verify build inside the sim container: `cd /ros2_ws && colcon build --packages-select couchmo_nav`.
+  - Create empty `couchmo_expert/__init__.py`, `launch/`, `config/` dirs.
+  - Verify build inside the sim container: `cd /ros2_ws && colcon build --packages-select couchmo_expert`.
 
 - [ ] **Step 4: `shared/preprocess.py`**
   - Function: `preprocess_pair(left_bgr: np.ndarray, right_bgr: np.ndarray) -> np.ndarray` returning `(2, 84, 84) uint8`.
@@ -186,8 +188,8 @@
 
 - [ ] **Step 11: Commit**
   ```bash
-  git add .gitattributes .gitignore shared training runtime simulation/src/couchmo_nav simulation/scripts/fixtures
-  git commit -m "scaffold: three-surface project layout (sim/training/runtime) + couchmo_nav package"
+  git add .gitattributes .gitignore shared training runtime simulation/src/couchmo_expert simulation/scripts/fixtures
+  git commit -m "scaffold: three-surface project layout (sim/training/runtime) + couchmo_expert package"
   ```
 
 ---
@@ -349,11 +351,11 @@
 ## Task 5: Pure-pursuit waypoint expert @10 Hz
 
 **Files:**
-- Create: `simulation/src/couchmo_nav/couchmo_nav/waypoint_expert_node.py`
-- Create: `simulation/src/couchmo_nav/launch/waypoint_expert.launch.py`
-- Create: `simulation/src/couchmo_nav/config/waypoint_follower.yaml`
+- Create: `simulation/src/couchmo_expert/couchmo_expert/waypoint_expert_node.py`
+- Create: `simulation/src/couchmo_expert/launch/waypoint_expert.launch.py`
+- Create: `simulation/src/couchmo_expert/config/waypoint_follower.yaml`
 - Create: `training/tests/test_pure_pursuit.py`
-- Modify: `simulation/src/couchmo_nav/setup.py` (entry point)
+- Modify: `simulation/src/couchmo_expert/setup.py` (entry point)
 
 - [ ] **Step 1: Real failing tests** (pure logic, no ROS)
   - `test_straight_path_zero_steer`: pose on the centerline → `|steer| < 1e-3`.
@@ -379,7 +381,7 @@
 
 - [ ] **Step 7: Commit**
   ```bash
-  git add simulation/src/couchmo_nav/couchmo_nav/waypoint_expert_node.py simulation/src/couchmo_nav/launch/waypoint_expert.launch.py simulation/src/couchmo_nav/config/waypoint_follower.yaml simulation/src/couchmo_nav/setup.py training/tests/test_pure_pursuit.py
+  git add simulation/src/couchmo_expert/couchmo_expert/waypoint_expert_node.py simulation/src/couchmo_expert/launch/waypoint_expert.launch.py simulation/src/couchmo_expert/config/waypoint_follower.yaml simulation/src/couchmo_expert/setup.py training/tests/test_pure_pursuit.py
   git commit -m "sim: pure-pursuit waypoint expert producing (steer, throttle) at 10 Hz"
   ```
 
@@ -388,9 +390,9 @@
 ## Task 6: Action adapter (steer/throttle → cmd_vel)
 
 **Files:**
-- Create: `simulation/src/couchmo_nav/couchmo_nav/steer_throttle_to_cmd_vel.py`
+- Create: `simulation/src/couchmo_expert/couchmo_expert/steer_throttle_to_cmd_vel.py`
 - Create: `training/tests/test_action_adapter.py`
-- Modify: `simulation/src/couchmo_nav/setup.py` (entry point)
+- Modify: `simulation/src/couchmo_expert/setup.py` (entry point)
 
 - [ ] **Step 1: Real failing tests** (pure mapping, no ROS)
   - `throttle=0` → `linear.x == 0`.
@@ -406,7 +408,7 @@
 
 - [ ] **Step 4: Commit**
   ```bash
-  git add simulation/src/couchmo_nav/couchmo_nav/steer_throttle_to_cmd_vel.py training/tests/test_action_adapter.py simulation/src/couchmo_nav/setup.py
+  git add simulation/src/couchmo_expert/couchmo_expert/steer_throttle_to_cmd_vel.py training/tests/test_action_adapter.py simulation/src/couchmo_expert/setup.py
   git commit -m "sim: adapter mapping (steer, throttle) to cmd_vel at 10 Hz"
   ```
 
@@ -415,10 +417,10 @@
 ## Task 7: Dataset recorder (writes shared `.npz` shards)
 
 **Files:**
-- Create: `simulation/src/couchmo_nav/couchmo_nav/dataset_recorder_node.py`
-- Create: `simulation/src/couchmo_nav/launch/record_dataset.launch.py`
+- Create: `simulation/src/couchmo_expert/couchmo_expert/dataset_recorder_node.py`
+- Create: `simulation/src/couchmo_expert/launch/record_dataset.launch.py`
 - Create: `training/tests/test_dataset_format.py`
-- Modify: `simulation/src/couchmo_nav/setup.py` (entry point)
+- Modify: `simulation/src/couchmo_expert/setup.py` (entry point)
 
 **Container path:** writes to `/workspace/data/<episode_id>/shard_<n>.npz` — host-visible at `training/data/...` via the bind mount from Task 1.
 
@@ -441,7 +443,7 @@
 
 - [ ] **Step 4: Commit**
   ```bash
-  git add simulation/src/couchmo_nav/couchmo_nav/dataset_recorder_node.py simulation/src/couchmo_nav/launch/record_dataset.launch.py training/tests/test_dataset_format.py simulation/src/couchmo_nav/setup.py
+  git add simulation/src/couchmo_expert/couchmo_expert/dataset_recorder_node.py simulation/src/couchmo_expert/launch/record_dataset.launch.py training/tests/test_dataset_format.py simulation/src/couchmo_expert/setup.py
   git commit -m "sim: dataset recorder writes shared .npz shards via bind-mounted volume"
   ```
 
