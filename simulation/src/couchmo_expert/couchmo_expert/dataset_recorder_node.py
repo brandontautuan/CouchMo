@@ -46,7 +46,6 @@ raises ``RuntimeError`` at runtime if invoked without ROS.
 from __future__ import annotations
 
 import datetime
-import os
 from pathlib import Path
 from typing import Any
 
@@ -169,7 +168,11 @@ class ShardBuffer:
         throttle:
             Throttle command in ``[0, 1]``.
         t:
-            Monotonic time in seconds since episode start.
+            ``t`` is recorded as seconds elapsed since episode start, derived from ROS
+            ``get_clock()``. When ``use_sim_time=True`` (the default when launched
+            alongside Gazebo) this follows ``/clock``, so the timeline freezes if the
+            simulator is paused — duplicate timestamps in a shard indicate a paused sim,
+            not a recorder bug.
 
         Returns
         -------
@@ -306,6 +309,10 @@ if ROS_AVAILABLE:
             # None until the first message is received.
             self._latest_action: tuple[float, float] | None = None
 
+            # Throttled WARN: tracks the last time we warned about missing action.
+            # None means we have not yet emitted any warning.
+            self._last_noaction_warn_ns: int | None = None
+
             # Build ATS over the two Image topics only — Vector3 has no Header
             # so it cannot participate in ApproximateTimeSynchronizer.
             left_sub = message_filters.Subscriber(self, Image, left_topic)
@@ -348,9 +355,16 @@ if ROS_AVAILABLE:
             if self._latest_action is None:
                 # No expert action yet — drop this frame pair to avoid
                 # zero-throttle samples polluting the dataset.
-                self.get_logger().debug(
-                    "dataset_recorder: no action cached yet — dropping frame pair"
-                )
+                now_ns = self.get_clock().now().nanoseconds
+                if (
+                    self._last_noaction_warn_ns is None
+                    or (now_ns - self._last_noaction_warn_ns) >= 5_000_000_000
+                ):
+                    self.get_logger().warn(
+                        "dataset_recorder: no /expert/steer_throttle received yet"
+                        " — dropping synced image pairs (check the waypoint_expert node)"
+                    )
+                    self._last_noaction_warn_ns = now_ns
                 return
 
             # Record episode start on first accepted sample
