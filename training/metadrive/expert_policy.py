@@ -24,19 +24,35 @@ if TYPE_CHECKING:
 
 
 class IDMExpertAdapter:
-    """Produces CouchMo-format (steer, throttle) from MetaDrive's IDM expert."""
+    """Produces CouchMo-format (steer, throttle) from MetaDrive's IDM expert.
+
+    IDMPolicy is stateful (PID controllers, lane-routing memory), so we bind
+    one instance to the current ego vehicle and reuse it across steps. When the
+    underlying env is reset, MetaDrive may swap in a new vehicle object — we
+    detect that by identity and rebuild the policy, destroying the old one so
+    Panda3D tasks registered by the prior instance don't leak.
+    """
 
     def __init__(self, env: "CouchMoMetaDriveEnv") -> None:
         self._env = env
+        self._policy: IDMPolicy | None = None
+        self._vehicle = None
 
     def act(self) -> np.ndarray:
         engine = self._env._md_env.engine
         vehicle = engine.agent_manager.active_agents["default_agent"]
 
-        # IDMPolicy's action tensor is shape (2,): [steering, throttle_brake].
-        policy = IDMPolicy(vehicle, random_seed=0)
-        raw = policy.act(agent_id="default_agent")
-        raw = np.asarray(raw, dtype=np.float32)
+        if self._vehicle is not vehicle:
+            if self._policy is not None:
+                destroy = getattr(self._policy, "destroy", None)
+                if callable(destroy):
+                    destroy()
+            self._policy = IDMPolicy(vehicle, random_seed=0)
+            self._vehicle = vehicle
+
+        # IDMPolicy.act ignores *args/**kwargs and reads state from
+        # self.control_object, so call it bare.
+        raw = np.asarray(self._policy.act(), dtype=np.float32)
 
         steer = float(np.clip(raw[0], -1.0, 1.0))
         throttle = float(np.clip(raw[1], 0.0, 1.0))  # drop brake (negative)

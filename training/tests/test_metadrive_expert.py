@@ -26,6 +26,33 @@ def test_expert_action_bounds():
         env.close()
 
 
+def test_expert_reuses_policy_across_steps_within_episode():
+    """IDMPolicy is stateful (PID, routing); the adapter must reuse one
+    instance across steps while the ego vehicle is the same, and rebuild
+    only when the env swaps the vehicle (e.g., across reset())."""
+    from training.metadrive.env import CouchMoMetaDriveEnv
+    from training.metadrive.expert_policy import IDMExpertAdapter
+
+    env = CouchMoMetaDriveEnv(config={"num_scenarios": 5})
+    try:
+        env.reset(seed=0)
+        expert = IDMExpertAdapter(env)
+        expert.act()
+        policy_after_first_act = expert._policy
+        expert.act()
+        assert expert._policy is policy_after_first_act, (
+            "policy instance should persist across steps in one episode"
+        )
+
+        env.reset(seed=1)
+        expert.act()
+        assert expert._policy is not policy_after_first_act, (
+            "policy should be rebuilt when env.reset() swaps the ego vehicle"
+        )
+    finally:
+        env.close()
+
+
 def test_expert_drives_forward_on_average():
     """The IDM expert should command positive throttle on most steps of a simple rollout."""
     from training.metadrive.env import CouchMoMetaDriveEnv
