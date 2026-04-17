@@ -41,6 +41,9 @@ def evaluate(
     start_seed: int = 10_000,
 ) -> dict[str, Any]:
     """Run deterministic held-out eval and return a metrics dict."""
+    if episodes <= 0:
+        raise ValueError(f"episodes must be >= 1, got {episodes}")
+
     import onnxruntime as ort
     from training.metadrive.env import CouchMoMetaDriveEnv
 
@@ -60,6 +63,10 @@ def evaluate(
             for step in range(max_steps):
                 x = obs[np.newaxis, :, :, :].astype(np.float32)
                 action = sess.run(None, {input_name: x})[0][0]
+                if not np.all(np.isfinite(action)):
+                    raise RuntimeError(
+                        f"Non-finite action from ONNX at ep={ep} step={step}: {action!r}"
+                    )
                 obs, _, term, trunc, _info = env.step(action)
                 ep_len = step + 1
                 if term or trunc:
@@ -70,6 +77,9 @@ def evaluate(
                     elif env._is_off_road():
                         off_roads += 1
                     break
+            # max_steps timeouts count toward mean_episode_length but are
+            # classified as neither collision nor off-road (they inflate the
+            # denominator for both rates, keeping a sluggish policy honest).
             lengths.append(ep_len)
             log.info("Episode %d/%d length=%d", ep + 1, episodes, ep_len)
     finally:
