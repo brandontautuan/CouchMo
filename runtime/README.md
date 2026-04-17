@@ -66,3 +66,21 @@ for i in range(6):
 
 The two indices that return `opened` are your left/right eyes. Pass them via
 `--left-cam` and `--right-cam`.
+
+## Sanity check (no hardware required)
+
+Run the policy against a recorded episode shard to confirm the install is
+sound. This reads the shard, runs every frame through the ONNX policy, and
+prints `predicted` vs `recorded` actions side by side. No serial is opened,
+no cameras are touched:
+
+```bash
+python -m runtime.drive --source replay \
+    --episode samples/tiny_episode.npz \
+    --model checkpoints/bc.onnx
+```
+
+If this exits 0 and prints one `step NNN  predicted=(..) recorded=(..)` line
+per frame, your laptop is ready to drive. Plug in the cameras and ESP32, then
+switch to `--source live` with the appropriate `--left-cam`, `--right-cam`,
+and `--port` values discovered above.
